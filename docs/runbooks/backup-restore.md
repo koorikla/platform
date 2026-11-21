@@ -4,12 +4,13 @@
 
 ## When to use
 
-Use this runbook before destructive upgrades or maintenance windows, when recovering stateful components (`etcd`, OpenBao, Thunder, Harbor, CloudNativePG), when converting an older `k3d` management cluster from SQLite to embedded `etcd`, or when running periodic restore drills.
+Use it before a risky upgrade, to recover a stateful component (`etcd`, OpenBao, Thunder, Harbor, CloudNativePG), or for
+a restore drill. Everything not in this table is rebuilt from Git by Argo CD.
 
 | Plane | Stateful data | Rebuilt from Git? |
 |---|---|---|
 | Management `etcd` (`k3d-platform-mgmt`) | CAPI `Cluster`/`Machine` objects, cluster kubeconfigs and CAs in `fleet`, `platform-secrets` (local backend) | Addons and platform CRs rebuild from Git; CAPI node/CA secrets and local `platform-secrets` do **not** |
-| Workload `etcd` (`dev1`, `prod1`, cloud) | Workload API state, local Secrets/PV bindings | Addons and OpenChoreo `RenderedRelease` resources re-sync from mgmt |
+| Workload `etcd` (`dev1`, cloud clusters) | Workload API state, local Secrets/PV bindings | Addons and OpenChoreo `RenderedRelease` resources re-sync from mgmt |
 | OpenBao (`openbao`) | PVC `data-openbao-0` (internal mesh root + intermediate keys, tenant app secrets in `kv-tenant-<project>`) **and** store key `openbao-unseal` | Policies, member roles and tenant mounts rebuild (`mesh-reconcile`, tenant reconcile); CA private keys and app secret values do **not** (locally the demo tenant's value is re-seeded) |
 | Thunder (`thunder`) | PVCs `thunder-database-pvc`, `thunder-certs-pvc`, `thunder-secrets-pvc` | Default clients/roles upsert (`thunder-setup`); runtime users, sessions, and signing keys live on the PVCs |
 | Harbor (`harbor`) | PVCs `database-data-harbor-database-0`, `harbor-registry` **and** store key `harbor` (`secretKey`) | Projects, proxy caches, replication, and robots rebuild (`harbor-config`); pushed `apps/` images do **not** |
@@ -17,7 +18,7 @@ Use this runbook before destructive upgrades or maintenance windows, when recove
 
 ## Symptoms
 
-- Management or workload API server fails to start after host disk exhaustion, unclean shutdown, or SQLite compaction failure (`Transaction commit failed`).
+- Management or workload API server fails to start after a full disk or an unclean shutdown.
 - Thunder PVCs are `Terminating` (held only by `kubernetes.io/pvc-protection`) or `thunder-mgmt` fails sync with `spec is immutable` on a manually recreated PVC.
 - OpenBao pod `openbao-0` starts uninitialized or sealed after storage loss or unseal-key mismatch.
 - Harbor database or registry storage needs pre-upgrade backup or post-corruption restore.
@@ -27,7 +28,10 @@ Use this runbook before destructive upgrades or maintenance windows, when recove
 
 ### 1. Management cluster etcd (`k3d`)
 
-`bootstrap/k3d-mgmt.yaml` passes `--cluster-init` to `server:0`, so `k3d-platform-mgmt` runs embedded `etcd` (automatic snapshots every 12h, retaining 5 under `/var/lib/rancher/k3s/server/db/snapshots`). Locally it runs without fsync (`--etcd-arg=unsafe-no-fsync=true`, [dev-environment.md](../dev-environment.md)): a host or Docker VM crash can lose the last writes, so restore from a snapshot or rebuild with `task down` and `task up`.
+`k3d-platform-mgmt` runs embedded `etcd` (`--cluster-init` in `bootstrap/k3d-mgmt.yaml`). k3s takes automatic
+snapshots every 12 h and keeps 5 under `/var/lib/rancher/k3s/server/db/snapshots`. The local etcd runs without fsync
+([why](../dev-environment.md#local-stack-load-and-the-mgmt-datastore)), so a host or Docker VM crash can lose the last
+writes: restore a snapshot, or rebuild with `task down` and `task up`.
 
 #### On-demand snapshot and full volume backup
 
@@ -58,35 +62,6 @@ docker run --rm -v "$VOL":/var/lib/rancher/k3s "$IMG" server \
   --cluster-reset --cluster-reset-restore-path="/var/lib/rancher/k3s/server/db/snapshots/$SNAP"
 docker start "$C"
 kubectl --context k3d-platform-mgmt get nodes
-```
-
-#### Legacy SQLite (`kine`) to embedded `etcd` conversion
-
-Only needed for a `k3d-platform-mgmt` created before [#76](https://github.com/koorikla/platform/issues/76) (`ROLES` lacks `etcd`; `dev-environment.md` [Local stack load](../dev-environment.md#local-stack-load-and-the-mgmt-datastore)). Requires a ~15-minute maintenance window and ~12 GB free disk (prefix `MSYS_NO_PATHCONV=1` on Windows Git Bash):
-
-```bash
-C=k3d-platform-mgmt-server-0
-IMG=$(yq -r .image bootstrap/k3d-mgmt.yaml)
-VOL=$(docker inspect "$C" -f '{{range .Mounts}}{{if eq .Destination "/var/lib/rancher/k3s"}}{{.Name}}{{end}}{{end}}')
-BK="$HOME/platform-mgmt-backup-$(date +%Y%m%d-%H%M)"; mkdir -p "$BK" && chmod 700 "$BK"
-
-# 1. Stop cleanly so k3s checkpoints the SQLite WAL (CAPD clusters keep running)
-docker stop -t 120 "$C"
-
-# 2. Back up server/ and storage/
-docker run --rm -v "$VOL":/k3s:ro -v "$BK":/backup --entrypoint tar "$IMG" -C /k3s -cf /backup/k3s.tar server storage
-tar -tf "$BK/k3s.tar" server/db/state.db server/db/state.db-wal server/token >/dev/null && echo backup-ok
-
-# 3. Start once with cluster-init: true so k3s migrates state.db into etcd
-printf 'cluster-init: true
-' > "$BK/config.yaml"
-docker cp "$BK/config.yaml" "$C":/etc/rancher/k3s/config.yaml
-docker start "$C"
-
-# 4. Verify state.db.migrated exists and ROLES includes etcd, then take the first snapshot
-docker exec "$C" ls /var/lib/rancher/k3s/server/db
-kubectl --context k3d-platform-mgmt get nodes
-docker exec "$C" k3s etcd-snapshot save --name post-migration
 ```
 
 ### 2. CAPD and cloud workload cluster `etcd`
@@ -138,7 +113,7 @@ To restore from `$BK` `(not yet verified live)`, confirm the matching `platform-
 
 Thunder's 3 PVCs (`thunder-database-pvc`, `thunder-certs-pvc`, `thunder-secrets-pvc` in `thunder`) are PreSync hooks with `hook-failed` and `platform.koorikla.io/delete-protection: enabled`, guarded by `ValidatingAdmissionPolicy/thunder-pvc-delete-protection` ([openchoreo.md](../openchoreo.md#argo-cd-requirements)).
 
-If a PVC enters `Terminating` or must be rebound to `Retain` PVs (exercised live in PR #79 / [#85](https://github.com/koorikla/platform/issues/85)):
+Use this when a Thunder PVC is `Terminating` or must be rebound to its `Retain` PV ([#85](https://github.com/koorikla/platform/issues/85) has the live run):
 
 ```bash
 K="kubectl --context k3d-platform-mgmt"
@@ -177,7 +152,7 @@ for pv in "$PV_DB" "$PV_CERT" "$PV_SEC"; do
 done
 
 # 4. Recreate PVCs with `kubectl create` (NEVER `kubectl apply`: Argo CD migrates client-side apply to SSA manager
-#    argocd-controller and then fails forever with `spec is immutable` trying to strip volumeName/storageClassName, #85)
+#    argocd-controller and then fails forever with `spec is immutable` trying to strip volumeName/storageClassName)
 for spec in "thunder-database-pvc $PV_DB 1Gi" "thunder-certs-pvc $PV_CERT 16Mi" "thunder-secrets-pvc $PV_SEC 16Mi"; do
   set -- $spec
   cat <<EOF | $K create -f -
@@ -206,7 +181,7 @@ $K -n thunder delete job thunder-setup --ignore-not-found
 $K -n argocd scale statefulset/argocd-application-controller deploy/argocd-applicationset-controller --replicas=1
 ```
 
-- **k3s restart mid-recovery ([#85](https://github.com/koorikla/platform/issues/85))**: if `k3s` restarts while an older hook-delete was in flight and leaves the recreated PVCs `Terminating`, repeat steps 2–4 once while Argo CD stays frozen.
+- **k3s restarts mid-recovery**: if `k3s` restarts while an older hook-delete was in flight and leaves the recreated PVCs `Terminating`, repeat steps 2–4 once while Argo CD stays frozen.
 - **Cleanup**: once `thunder-mgmt` is `Synced` / `Healthy`, delete `$B` and `$B2` (`rm -rf "$B" "$B2"`), which hold Thunder's SQLite DB and keys.
 
 ### 5. Harbor (`harbor`)
@@ -265,7 +240,7 @@ Run these checks regularly without disrupting live traffic:
 ```bash
 K="kubectl --context k3d-platform-mgmt"
 
-# 1. Management node uses embedded etcd and snapshots are present
+# 1. Management node Ready and etcd snapshots present
 $K get nodes
 docker exec k3d-platform-mgmt-server-0 k3s etcd-snapshot ls
 
@@ -281,22 +256,13 @@ $K -n argocd get applications
 
 ## Rollback
 
-- **Failed legacy SQLite -> `etcd` conversion** (if `state.db.migrated` was not written in step 4):
-  ```bash
-  docker stop -t 120 "$C"
-  docker run --rm -v "$VOL":/k3s -v "$BK":/backup --entrypoint sh "$IMG" -c \
-    'rm -rf /k3s/server/db && tar -C /k3s -xf /backup/k3s.tar server/db'
-  printf '{}
-' > "$BK/empty.yaml"; docker cp "$BK/empty.yaml" "$C":/etc/rancher/k3s/config.yaml
-  docker start "$C"
-  ```
 - **Failed Thunder sync after PVC rebind**: `thunder-pvc-delete-protection` prevents `hook-failed` from deleting the rebound PVCs, and `$B2` preserves the stopped PV contents. Keep PVs on `Retain`, fix the chart/config in Git, and re-sync.
 - **Lost `openbao-unseal` or `data-openbao-0` locally**: re-initialize OpenBao by deleting `pvc/data-openbao-0` and restarting `openbao-0` ([incidents.md](incidents.md#openbao-sealed)), then roll mesh members' `istiod` and `ztunnel` once ESO updates `mesh-root-ca`.
 
 ## Related links
 
 - [Operations handbook](../operations.md)
-- [Mgmt datastore and load analysis](../dev-environment.md#local-stack-load-and-the-mgmt-datastore)
+- [Mgmt datastore settings](../dev-environment.md#local-stack-load-and-the-mgmt-datastore)
 - [Thunder PVC hook protection](../openchoreo.md#argo-cd-requirements)
 - [OpenBao unseal and mesh CA](../multicluster.md#unseal)
 - [Harbor registry persistence](../build-plane.md#registry-harbor)

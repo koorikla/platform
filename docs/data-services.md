@@ -1,6 +1,6 @@
 # Data services: PostgreSQL, MySQL, Kafka, event-driven autoscaling
 
-Three operators for workloads on workload clusters, **off by default** everywhere: a cluster runs them only after it
+Operators for workloads on workload clusters, **off by default** everywhere: a cluster runs them only after it
 opts in, so local docker environments stay lean (no Application is generated for a cluster that does not opt in).
 Catalog and labels: [conventions.md](conventions.md); addon mechanics: [architecture.md](architecture.md) "Addons".
 
@@ -8,10 +8,11 @@ Catalog and labels: [conventions.md](conventions.md); addon mechanics: [architec
 |---|---|---|---|
 | `cloudnative-pg` | cnpg-system | `cloudnative-pg` 0.29.1 (operator 1.30.1) + optional `plugin-barman-cloud` 0.9.0 (v0.16.0) | PostgreSQL clusters (`Cluster`, `Pooler`, `ScheduledBackup`, `Database`); backups to object storage through the Barman Cloud plugin |
 | `strimzi` | strimzi | `strimzi-kafka-operator` 1.3.1 | Apache Kafka in KRaft mode (`Kafka`, `KafkaNodePool`, `KafkaTopic`, `KafkaUser`, Connect, MirrorMaker 2, Bridge); no ZooKeeper |
+| `moco` | moco-system | `moco` 0.28.0 | MySQL 8.4 clusters with semi-sync GTID replication, the in-cluster backend of the MySQL API ([below](#mysql-as-a-service)) |
 | `keda` | keda | `keda` 2.21.0 | event-driven autoscaling (`ScaledObject`, `ScaledJob`, `TriggerAuthentication`), scale to zero, external metrics API |
 | `crossplane` | crossplane-system | `crossplane` 2.4.3 (Crossplane v2) | PostgreSQL as a service: one `PostgreSQL` API, fulfilled per cluster by CloudNativePG, RDS / Aurora, Cloud SQL or Azure Flexible Server ([below](#postgresql-as-a-service)) |
 
-The three operators: wrapper charts in `addons/<addon>/`, workload role only, CRDs from the chart applied server-side by Argo CD
+The operators: wrapper charts in `addons/<addon>/`, workload role only, CRDs from the chart applied server-side by Argo CD
 (the Kafka and CNPG `Cluster` CRDs exceed the client-side apply annotation limit), images multi-arch (amd64 + arm64)
 pinned by digest, Pod Security `restricted` enforced on the operator namespace, operator metrics scraped by the
 Prometheus agent of addon `telemetry`.
@@ -320,8 +321,8 @@ upgrading from the Helm-templated API). Live checks: [#107](https://github.com/k
 
 ## MySQL as a service
 
-The platform's MySQL API (`platform.koorikla.io/v1alpha1 MySQL`, package [`packages/mysql`](../packages/mysql/README.md),
-#256) with one in-cluster backend, [MOCO](https://github.com/cybozu-go/moco) (addon [`moco`](../addons/moco/README.md)).
+The platform's MySQL API (`platform.koorikla.io/v1alpha1 MySQL`, package [`packages/mysql`](../packages/mysql/README.md))
+with one in-cluster backend, [MOCO](https://github.com/cybozu-go/moco) (addon [`moco`](../addons/moco/README.md)).
 The cloud Compositions of the package are layout and are not installed.
 
 - **Opt in:** cluster file `addons: { crossplane: true, moco: true }`. The one label `addons.platform.koorikla.io/moco`

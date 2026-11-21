@@ -4,7 +4,9 @@
 
 ## When to use
 
-Use this runbook to inspect certificate expiry, rotate cert-manager CAs or leaf certificates, manage the OpenBao Istio mesh CA, rotate OpenChoreo data-plane agent certificates, rotate tenant application secrets (OpenBao), update GitHub App keys or PATs, rotate the `cosign-platform` build signing key, or refresh External Secrets Operator (ESO) secrets ([conventions.md](../conventions.md#secret-keys)).
+Use it to check certificate expiry or to rotate a CA, a leaf certificate, the OpenBao mesh CA, an OpenChoreo agent
+certificate, a GitHub App key or PAT, the `cosign-platform` signing key, an ESO-delivered secret, or a tenant app
+secret. Secret key names: [conventions.md](../conventions.md#secret-keys).
 
 ## Symptoms
 
@@ -41,8 +43,8 @@ kubectl --kubeconfig dev1.kubeconfig get certificate -A
 - **Cut off a compromised mesh member immediately**: remove `mesh.group` from `installations/<inst>/clusters/<name>.yaml` and merge. Within 5 minutes `CronJob/mesh-reconcile` deletes `auth/mesh-<name>` and entity `mesh-<name>` in OpenBao, blocking new certificates; then delete leftover peer discovery secrets ([multicluster.md](../multicluster.md#removing-a-member-decommissioning)):
   ```bash
   # On each remaining mesh member, remove the decommissioned peer's remote secret
-  task kubeconfig CLUSTER=prod1
-  kubectl --kubeconfig prod1.kubeconfig -n istio-system delete secret istio-remote-secret-<gone> --ignore-not-found
+  task kubeconfig CLUSTER=<member>
+  kubectl --kubeconfig <member>.kubeconfig -n istio-system delete secret istio-remote-secret-<gone> --ignore-not-found
   # On mgmt, remove the leftover reader cert Secret
   kubectl --context k3d-platform-mgmt -n fleet delete secret <gone>-mesh-reader --ignore-not-found
   ```
@@ -52,22 +54,24 @@ kubectl --kubeconfig dev1.kubeconfig get certificate -A
 
 Each workload cluster has its own `10y` CA (`fleet/<cluster>-agent-ca`) signing `fleet/<cluster>-agent-tls` (`1y`, renewed `30d` before expiry), delivered via ESO (`mgmt-fleet`) and `ClusterResourceSet/<cluster>-openchoreo-agent` into `openchoreo-data-plane/cluster-agent-tls` ([openchoreo.md](../openchoreo.md#trust-model)).
 
-OpenChoreo `1.3.3` agents read their TLS files only at startup ([#50](https://github.com/koorikla/platform/issues/50)). After an automatic renewal or manual rotation:
+The agent reads its TLS files only at startup. Reloader (addon `reloader`) rolls `deploy/cluster-agent-dataplane` when
+the ClusterResourceSet updates `cluster-agent-tls` or `cluster-gateway-ca` (pod annotations in
+`addons/openchoreo-data-plane/values.yaml`), so a renewal needs no action. To rotate now:
 
 ```bash
-# 1. Optional: force immediate rotation of dev1's client certificate on mgmt
+# 1. Force rotation of dev1's client certificate on mgmt
 kubectl --context k3d-platform-mgmt -n fleet delete secret dev1-agent-tls
 kubectl --context k3d-platform-mgmt -n fleet wait --for=condition=Ready certificate/dev1-agent-tls --timeout=60s
 kubectl --context k3d-platform-mgmt -n fleet annotate externalsecret dev1-openchoreo-agent \
   force-sync="$(date +%s)" --overwrite
 
-# 2. Restart the data-plane agent once ClusterResourceSet updates cluster-agent-tls
+# 2. Reloader rolls the agent once the ClusterResourceSet updates cluster-agent-tls; watch it
+#    (no roll within a few minutes: `rollout restart deploy/cluster-agent-dataplane` by hand)
 task kubeconfig CLUSTER=dev1
-kubectl --kubeconfig dev1.kubeconfig -n openchoreo-data-plane rollout restart deploy/cluster-agent-dataplane
 kubectl --kubeconfig dev1.kubeconfig -n openchoreo-data-plane rollout status deploy/cluster-agent-dataplane --timeout=120s
 ```
 
-If `openchoreo-control-plane/cluster-gateway-ca` rotates, also force-sync `openchoreo-gateway-ca` (`fleet`) and `cluster-gateway-ca` (`openchoreo-observability-plane`, `openchoreo-workflow-plane`), then restart `deploy/cluster-agent-observabilityplane`, `deploy/cluster-agent-workflowplane`, and every workload `deploy/cluster-agent-dataplane`.
+If `openchoreo-control-plane/cluster-gateway-ca` rotates, also force-sync `openchoreo-gateway-ca` (`fleet`) and `cluster-gateway-ca` (`openchoreo-observability-plane`, `openchoreo-workflow-plane`), then restart `deploy/cluster-agent-observabilityplane` and `deploy/cluster-agent-workflowplane` on mgmt (they have no Reloader annotation). Workload data-plane agents roll through Reloader.
 
 ### 4. GitHub App keys and registry PATs
 
@@ -91,7 +95,8 @@ kubectl --context k3d-platform-mgmt -n argocd get externalsecret platform-repo-c
 
 ### 5. `cosign-platform` signing key
 
-In-cluster workflow builds sign images with `cosign-platform` (`cosign.key`, `cosign.pub`, `cosign.password`; [supply-chain.md](../supply-chain.md#wiring-the-key)).
+In-cluster workflow builds sign images with `cosign-platform` (`cosign.key`, `cosign.pub`, `cosign.password`). How
+Kyverno gets the public key: [supply-chain.md](../supply-chain.md#wiring-the-key).
 
 ```bash
 # 1. Local backend: delete cosign-platform so `task secrets` generates a fresh encrypted keypair (not yet verified live)
@@ -103,7 +108,11 @@ kubectl --context k3d-platform-mgmt -n platform-secrets get secret cosign-platfo
   -o jsonpath='{.data.cosign\.pub}' | base64 -d
 ```
 
-Update `imageVerification.platformKey.publicKey` in `installations/<inst>/addons/kyverno-policies/values.yaml` via PR **before** promoting builds signed with the new key to `production`.
+- No `publicKey` set (default with Harbor, `installations/local`): the ClusterResourceSet delivers the new
+  `cosign.pub` to each workload cluster. No PR needed. Kyverno caches verified digests for up to 24 h.
+- Inline `publicKey` set: update `imageVerification.platformKey.publicKey` in
+  `installations/<inst>/addons/kyverno-policies/values.yaml` by PR before you promote builds signed with the new key
+  to `production`.
 
 ### 6. ESO-backed platform and workload secrets
 
@@ -115,7 +124,7 @@ K="kubectl --context k3d-platform-mgmt"
 # Example: rotate falco-webhook token (rotates all per-cluster sha256("<cluster>:<token>") tokens; observability.md)
 $K -n argo-events annotate externalsecret falco-webhook force-sync="$(date +%s)" --overwrite
 $K -n falco annotate externalsecret falcosidekick-escalation force-sync="$(date +%s)" --overwrite
-for c in dev1 prod1; do
+for c in dev1; do   # every workload cluster
   $K -n fleet annotate externalsecret "${c}-falco-escalation" force-sync="$(date +%s)" --overwrite
 done
 
@@ -137,7 +146,7 @@ in `kv-tenant-<project>`. Rotation = write a new version with the project's writ
 ([multicluster.md](../multicluster.md#tenant-secrets-openbao) "Writing a secret"; value from a file, never echoed).
 Nothing else to do: ESO refreshes the cell namespace's Secret within 15 s (`refreshInterval` of the component types'
 ExternalSecrets), and Reloader (addon `reloader`) then rolls every Deployment that references that Secret, in every
-environment and preview cell that reads the key (#268). Env vars and `subPath` files are only read at container start,
+environment and preview cell that reads the key. Env vars and `subPath` files are only read at container start,
 so the roll is what makes the app see the new value. Only Deployments that reference the changed Secret roll: the
 component types annotate them `secret.reloader.stakater.com/auto: "true"`, and VAP `reloader-rollout-only` lets
 Reloader change nothing but the rollout annotation, only in cells and `openchoreo-data-plane`.

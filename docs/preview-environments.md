@@ -2,7 +2,7 @@
 
 Every open pull request of an opted-in component gets its own OpenChoreo environment running the in-cluster build of
 the PR head. The URL appears on the PR as commit status `openchoreo/preview`. Closing or merging the PR removes the
-environment; a TTL (48h locally) removes forgotten ones. Issue: [#168](https://github.com/koorikla/platform/issues/168).
+environment; a TTL (48h locally) removes forgotten ones.
 
 ## How it works
 

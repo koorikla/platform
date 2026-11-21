@@ -2,7 +2,8 @@
 
 ## When to use
 
-Use this runbook during the first five minutes of investigating an unfamiliar degradation, missing telemetry signal, elevated error rate, or promotion-gate failure before branching into a specific playbook in [incidents.md](incidents.md).
+Use it for the first five minutes when something looks wrong and you do not know where yet: errors, missing telemetry,
+or a failing promotion gate. Once you know the failure mode, switch to [incidents.md](incidents.md).
 
 ## Symptoms
 
@@ -59,16 +60,16 @@ kubectl --kubeconfig dev1.kubeconfig -n kube-system exec ds/cilium -c cilium-age
 
 ### 3. SLOs and alerts that exist today
 
-There is no external paging on-call integration configured in the repository yet; automated checks and runtime alerts enforce gates at promotion, admission, and container execution:
+Nothing pages a human; the repo has no on-call integration. These checks act on their own:
 
 | Mechanism | Owner | Threshold / trigger | Action taken |
 |---|---|---|---|
-| Promotion gate observability check | `addons/openchoreo-platform` (`ClusterWorkflow/promotion-gate`) | Over the last `15m` (`observe.windowMinutes`): **0 fired alerts** in `observer` and **HTTP error rate `<= 5%`** (`observe.maxErrorRate: 0.05`; zero traffic is reported, not failed, [#104](https://github.com/koorikla/platform/issues/104)) | Blocks opening the `production` promotion PR ([promotion.md](../promotion.md#3-automated-gate-clusterworkflow-promotion-gate)) |
+| Promotion gate observability check | `addons/openchoreo-platform` (`ClusterWorkflow/promotion-gate`) | Over the last `15m` (`observe.windowMinutes`): **0 fired alerts** in `observer` and **HTTP error rate `<= 5%`** (`observe.maxErrorRate: 0.05`; zero traffic is reported, not failed) | Blocks opening the `production` promotion PR ([promotion.md](../promotion.md#3-automated-gate-clusterworkflow-promotion-gate)) |
 | Promotion gate smoke check | `addons/openchoreo-platform` | `GET` on every `status.endpoints[].externalURLs` returns `2xx`/`3xx` within 5 retries | Blocks opening the `production` promotion PR |
 | Runtime security (`CRITICAL`) | `addons/falco` + `addons/argo-events` | `Platform crypto miner indicators` in `dp-*` namespaces | `falco-talon` labels (`platform.koorikla.io/falco=suspicious`) and terminates the pod (`grace 0`); `falcosidekick` escalates to `argo-events`, recording a `FalcoCritical` Event on the `Component` ([observability.md](../observability.md#falco-response)) |
 | Runtime security (`WARNING` / `ERROR`) | `addons/falco` | `Platform shell in app container` (`dp-*`, `WARNING`: Talon label); `Platform write below etc` (`ERROR`) | Shipped to OpenSearch `container-logs-*` and OTel alert counters |
 | Supply-chain & Pod Security | `addons/kyverno-policies` | Unsigned/untrusted/tag-only images (`openchoreo-verify-images-*`, `openchoreo-attest-*`, `openchoreo-trusted-registries-*`), Pod Security `baseline` | `PolicyReport` findings in `development`/`staging` (`Audit`); hard admission `Deny` (`failurePolicy: Fail`) on images in `production` |
-| Component alert rules | `openchoreo-observability-plane` | `Alertmanager` + `metrics-adapter-prometheus` + OpenSearch alerting -> `observer` | Plumbing deployed; allowing OpenChoreo's `observability-alert-rule` trait on platform component types is tracked in [#48](https://github.com/koorikla/platform/issues/48) |
+| Component alert rules | `openchoreo-observability-plane` | `Alertmanager` + `metrics-adapter-prometheus` + OpenSearch alerting -> `observer` | Components opt in with the `observability-alert-rule` trait (allowed on the `service`, `webapp` and `worker` component types); fired alerts fail the promotion gate's observability check |
 
 ```bash
 # Check Kyverno PolicyReport summaries and FalcoCritical events quickly

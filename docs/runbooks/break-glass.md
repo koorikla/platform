@@ -2,7 +2,8 @@
 
 ## When to use
 
-Use this runbook **only** when normal GitOps delivery or an automated gate is deadlocked during an active incident or recovery procedure and no declarative fix can land in time. Every break-glass action leaves an explicit audit record and must be reconciled back to `main` before closing the incident.
+Use it only when GitOps delivery or an automated gate is deadlocked during an incident and a fix through Git cannot
+land in time. Record every action, and bring the state back to `main` before you close the incident.
 
 ## Symptoms
 
@@ -83,7 +84,9 @@ $K -n thunder delete pvc thunder-database-pvc
 
 ### Single-server etcd quorum loss
 
-For local or `dev` clusters with `controlPlane.replicas: 1` where the `2 -> 1` `etcd` member removal lost quorum (the new server already holds promoted voter data). Verified with k3s v1.35.10+k3s1 on a throwaway two-server reproduction with the cluster-api-k3s config files ([#56](https://github.com/koorikla/platform/issues/56)): data written before the loss survives and the API accepts writes again.
+Use it on local or `dev` clusters with `controlPlane.replicas: 1` when the `2 -> 1` etcd member removal of a rollout
+lost quorum (the new server already holds the data). Data written before the loss survives and the API accepts writes
+again (tested on a two-server k3s reproduction, [#56](https://github.com/koorikla/platform/issues/56)).
 
 The newest server joined through the load balancer, so cluster-api-k3s wrote `server: https://<endpoint>` into its `/etc/rancher/k3s/config.yaml`. k3s refuses `--cluster-reset` while that is set (`cannot perform cluster-reset while server URL is set`). Remove the line for the reset only and restore it afterwards. k3s then starts from the reset data and ignores `server:`. On the first (`cluster-init`) server the `sed` changes nothing.
 
@@ -110,7 +113,7 @@ docker exec "$SURVIVOR" k3s kubectl get nodes   # the dead server's Node goes wh
 Re-initialize OpenBao from scratch on a local installation (`seal "static"`) only when one of these applies:
 
 - `openbao-unseal` was lost and `data-openbao-0` can no longer be decrypted.
-- A change to self-initialisation (`addons/openbao/values.yaml` `initialize` blocks) must reach a running installation. That covers non-tenant policies and identities, and once, the policy reconciler on an installation initialised before it existed ([#96](https://github.com/koorikla/platform/issues/96)). Tenant policies don't need it: the CronJob `policy-reconcile` applies them from git ([multicluster.md](../multicluster.md#policies-from-git-the-policy-reconciler)). There is no root-token alternative: self-initialisation creates no recovery keys, so `generate-root` cannot work (`task test:openbao`).
+- A change to self-initialisation (`addons/openbao/values.yaml` `initialize` blocks) must reach a running installation. That covers non-tenant policies and identities. Tenant policies don't need it: the CronJob `policy-reconcile` applies them from git ([multicluster.md](../multicluster.md#policies-from-git-the-policy-reconciler)). There is no root-token alternative: self-initialisation creates no recovery keys, so `generate-root` cannot work (`task test:openbao`).
 
 Re-initialization wipes every OpenBao object. The mesh gets new group roots, so every member re-enrols and its workloads roll onto the new root. Tenant KV data is lost too, so write it again afterwards. Get approval first.
 

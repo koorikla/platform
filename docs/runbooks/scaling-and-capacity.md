@@ -49,7 +49,7 @@ kubectl --kubeconfig dev1.kubeconfig -n istio-system delete secret istio-remote-
 kubectl --context k3d-platform-mgmt -n fleet delete secret <name>-mesh-reader --ignore-not-found
 ```
 
-For tearing down the **entire** local stack (`dev1`, `prod1`, and `k3d-platform-mgmt`), run `task down` (it freezes Argo CD first so `selfHeal` cannot recreate `Cluster`s while CAPD deletes them).
+To tear down the whole local stack (every CAPD cluster and `k3d-platform-mgmt`), run `task down` (it freezes Argo CD first so `selfHeal` cannot recreate `Cluster`s while CAPD deletes them).
 
 ### 3. Scale worker nodes (`MachineDeployment`)
 
@@ -82,7 +82,9 @@ kubectl --context k3d-platform-mgmt -n fleet get machines -l cluster.x-k8s.io/cl
 
 ### 5. Local RAM profiles and host limits
 
-On a local host, `k3d-platform-mgmt` (~`8.3 GiB` RSS; observability plane ~`2.2 GiB` requests / ~`5 GiB` limits) plus two single-node CAPD clusters (`dev1` + `prod1`, ~`1.6–2.5 GiB` each; [observability.md](../observability.md#resource-budget-requests-local), [networking.md](../networking.md#footprint-per-workload-cluster-requests-1-node)) totals ~`16 GiB` RSS ([dev-environment.md](../dev-environment.md#local-stack-load-and-the-mgmt-datastore)).
+The local profiles and their RAM (lean: mgmt + `dev1`, about 12.4 GiB; multicluster adds `prod1`) are in
+[dev-environment.md](../dev-environment.md#local-profiles). Datastore settings for slow disks:
+[dev-environment.md](../dev-environment.md#local-stack-load-and-the-mgmt-datastore).
 
 ```bash
 # Check host memory/swap, container RSS, and Linux inotify limits
@@ -95,7 +97,8 @@ sysctl fs.inotify.max_user_watches fs.inotify.max_user_instances
   ```bash
   sudo sysctl -w fs.inotify.max_user_watches=524288 fs.inotify.max_user_instances=512
   ```
-- **Single-workload-cluster lean profile ([#115](https://github.com/koorikla/platform/issues/115))**: `installations/local/clusters/dev1.yaml` hosts all three environments (`[development, staging, production]`), and Kyverno `Audit`/`Deny` policies match namespace label `openchoreo.dev/environment` rather than cluster name. Disabling a second CAPD cluster (`installations/<inst>/clusters/<name>.yaml.disabled`, Invariant 7) and keeping `openbao` off when single-cluster saves ~`2 GiB` host RAM; re-enabling the second cluster file and `openbao` switches back to multicluster mesh.
+- **Free RAM**: stay on the lean profile (one workload cluster). Switching profiles moves the `production`
+  environment between clusters: follow [dev-environment.md](../dev-environment.md#local-profiles).
 
 ## Verify
 

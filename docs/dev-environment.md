@@ -236,10 +236,7 @@ One installation (`installations/local`), two profiles. The fleet files are the 
 `byo1.yaml.disabled` is a separate opt-in, not part of either profile: a plain k3d cluster registered as
 `provider: byo` (~2.3 GiB; [providers.md](providers.md#bring-your-own-cluster-byo)).
 
-Measured on 2026-11-16 on one stack before and after prod1 was removed (#115; single-server CAPD nodes,
-`controlPlane.replicas: 1`): host memory in use (`free`) fell from 26.3-26.8 GB to 22.6-22.8 GB. dev1 grew from 3.8 to
-4.1-4.3 GiB when it took production over; prod1, running with no environment, held 3.3-3.6 GiB (+ 18 MiB for its load
-balancer container); mgmt varied between 7.6 and 8.4 GiB throughout.
+Numbers are for single-server CAPD nodes (`controlPlane.replicas: 1`); mgmt varies between 7.6 and 8.4 GiB.
 
 Switch to multicluster: rename the file and move `production` to it (an environment lives on exactly one enabled
 cluster; `hack/tests/test_local_profiles.sh` checks both profiles):
@@ -269,7 +266,7 @@ still run. Two merges:
 2. Remove both overrides and, for lean, rename `prod1.yaml` back to `prod1.yaml.disabled` with
    `environments: [production]`.
 
-Lean was reached this way on the reference host (#115); the multicluster direction is render-checked only (VERIFY).
+The move to lean ran live on the reference host; the move to multicluster is render-checked only (VERIFY).
 
 What keeps working on one cluster:
 - OpenChoreo isolates environments by namespace (`dp-<org>-<project>-<env>-<hash>`) and by host
@@ -286,64 +283,32 @@ picks addon `env-<environment>.yaml` overlays) also covers production's namespac
 
 ## Local stack load and the mgmt datastore
 
-Measured on the 20-core / 31 GiB reference host with mgmt + dev1 (3 servers) + prod1
-([#76](https://github.com/koorikla/platform/issues/76)): the local platform holds ~16 GiB RSS (mgmt ~8.3, each CAPD node
-1.6-2.5) plus ~3 GiB swapped. Next to other host workloads that is more than RAM: the host swaps at 100-160 MB/s, I/O
-pressure is `full ~30%`, and a load average of 30-40 is mostly tasks waiting on I/O (CPU pressure `some` ~8%, 30% idle),
-not CPU. Slow fsyncs then hit both datastores: CAPD k3s (embedded etcd) loses leader election on 5 s lease renewals and
-restarts (prod1: 20 restarts in 10 hours), and the k3d mgmt (single k3s server, kine/SQLite) crash-loops.
+On a busy host the local stack is limited by disk I/O, not CPU. Slow fsyncs stall etcd, and k3s exits when an embedded
+controller misses a lease renewal (`leaderelection lost`). The settings below keep the clusters up on slow disks. They
+work inside the containers, so Linux, macOS and Windows Docker hosts behave the same.
 
-**Mgmt crash loop (kine/SQLite).** A single-server k3d cluster stores its state in SQLite through kine, and kine compacts
-old revisions in batches of 1000 inside a transaction. On this host the first batch's transaction fails and k3s exits
-with `level=fatal msg="Transaction commit failed: sql: transaction has already been committed or rolled back"`, about 11
-minutes after every start, forever: the compaction never advances (`compactRev=1150478` on every logged attempt while
-`currentRev` grew 1227790 -> 1257927), so the database only grows (`state.db` 0.9 GB + `state.db-wal` 0.9 GB). Every
-restart also restarts all mgmt pods (containerd runs inside k3s: `SandboxChanged`), reruns every controller's initial
-list and the Kyverno background scan, and the I/O burst pushes the CAPD clusters' etcd over their lease deadlines.
-Embedded etcd compacts incrementally and never exits on a slow compaction; the conversion copies only the current keys.
+| Setting | Where | Why |
+|---|---|---|
+| Embedded etcd (`--cluster-init`) | `bootstrap/k3d-mgmt.yaml` | kine/SQLite compaction crash-looped a busy single-server mgmt ([#76](https://github.com/koorikla/platform/issues/76)). etcd compacts incrementally. |
+| `--etcd-arg=unsafe-no-fsync=true` | `bootstrap/k3d-mgmt.yaml` | WAL fsyncs on the shared disk stalled etcd for over 8 s ([#344](https://github.com/koorikla/platform/issues/344)). |
+| `CATTLE_ELECTION_LEASE_DURATION=120s`, `..._RENEW_DEADLINE=90s`, `..._RETRY_PERIOD=10s` | `bootstrap/k3d-mgmt.yaml` | k3s's own `k3s` and `k3s-etcd` leases. One server, so a long lease costs nothing. |
+| 60 s leases, 40 s renew deadline for kube-controller-manager, scheduler, cloud-controller-manager | `bootstrap/k3d-mgmt.yaml`, ClusterClass `k3s-docker` (`k3s.dockerLeaderElectionArgs`) | Upstream 15 s / 10 s lost leader election on 5-8 s fsync stalls ([#82](https://github.com/koorikla/platform/issues/82)). |
+| `--leaderElectionRetryPeriod=10s` (60 s lease, 50 s deadline) | `addons/kyverno` | Upstream 2 s restarted all Kyverno controllers on etcd stalls and rejected pods while admission was down. The build `sign` step also retries (`retryPolicy: OnError`). |
 
-New mgmt clusters run embedded etcd from the start: `bootstrap/k3d-mgmt.yaml` passes `--cluster-init` to `server:0`
-([#76](https://github.com/koorikla/platform/issues/76)). To convert an older SQLite mgmt cluster in place without
-losing state (and for `etcd` snapshot and rollback commands), follow
-[runbooks/backup-restore.md](runbooks/backup-restore.md#legacy-sqlite-kine-to-embedded-etcd-conversion).
+Trade-off: without fsync, a host or Docker VM crash can lose the last mgmt writes. Rebuild with `task down` and
+`task up`, or restore a snapshot ([runbooks/backup-restore.md](runbooks/backup-restore.md)). k3d applies server args at
+create time only, so a changed setting needs a new mgmt cluster. A CAPD cluster gets new args through a control-plane
+rollout.
 
-**Leader election on slow disks.** etcd alone does not stop the restarts: k3s runs kube-controller-manager, scheduler and
-cloud-controller-manager in-process and exits when one misses its lease renewal (`"leaderelection lost"`). The clean
-bootstrap's I/O burst stalled etcd `fdatasync` for 5-8 s and restarted the mgmt k3s 5 times in its first 15 minutes.
-Both the k3d mgmt (`bootstrap/k3d-mgmt.yaml`) and the CAPD control planes (ClusterClass `k3s-docker`,
-`k3s.dockerLeaderElectionArgs`) run 60 s leases with a 40 s renew deadline instead of upstream 15 s / 10 s
-([#82](https://github.com/koorikla/platform/issues/82)). k3d sets server args at create time only: an older mgmt keeps
-the short leases until it is re-created; a CAPD cluster gets them through a control-plane rollout.
-Check: `docker logs k3d-platform-mgmt-server-0 2>&1 | grep -c 'leaderelection lost'` and
-`docker inspect k3d-platform-mgmt-server-0 --format '{{.RestartCount}}'` stay 0.
+Check after a clean `task up` (every count stays 0, the lease shows 120):
 
-**etcd stalls and k3s's own leases.** The leases above do not cover k3s itself: its `k3s` and `k3s-etcd` leases come
-from wrangler (45 s lease, 30 s renew deadline) and k3s exits with `leaderelection lost for k3s` when one misses
-([#344](https://github.com/koorikla/platform/issues/344)). A clean bootstrap on main stalled etcd at 17:34:54Z, k3s exited
-and Docker restarted the server (RestartCount 1, every pod `Unknown`, exit 255). The next clean bootstrap survived by a
-hair: one etcd apply took 29-31 s (19:55:16Z; kube-scheduler/ccm/kcm lease updates failed with `etcdserver: request timed
-out`), and its metrics showed the cause is the disk: 48,849 WAL fsyncs (mean 17 ms, 1.4% over 128 ms, one over 8 s) and
-bolt commits over 8 s, on a disk shared with image pulls, Harbor, CNPG and the CAPD nodes. `bootstrap/k3d-mgmt.yaml`
-therefore runs the mgmt etcd with `--etcd-arg=unsafe-no-fsync=true` (a scratch k3s with it committed 1,220 proposals with
-2 WAL fsyncs) and sets `CATTLE_ELECTION_LEASE_DURATION=120s`, `CATTLE_ELECTION_RENEW_DEADLINE=90s` and
-`CATTLE_ELECTION_RETRY_PERIOD=10s` on the server (single server: nothing fails over, so a long lease costs nothing).
-Both work inside the container, so Linux, macOS and Windows Docker hosts behave the same (Docker Desktop's VM disk has the
-slowest fsync). Trade-off: a `docker restart` keeps the host page cache, but a host or Docker VM crash can lose the last
-writes; rebuild with `task down` and `task up` then. Rejected: kine/SQLite (k3s then disables leader election, but its
-compaction crash-looped, #76), etcd on tmpfs (k3d has no portable tmpfs option and a restart would wipe the cluster) and a
-separate volume (same disk). k3d applies both at create time only. Check after a clean `task up`:
-`docker exec k3d-platform-mgmt-server-0 kubectl -n kube-system get lease k3s k3s-etcd` shows
-`leaseDurationSeconds` 120 and `grep fsync /var/lib/rancher/k3s/server/db/etcd/config` in the container prints
-`unsafe-no-fsync: true`.
-
-In-cluster controllers with short leases still restart on those stalls even when k3s survives them. Kyverno derives its
-lease (6x) and renew deadline (5x) from `--leaderElectionRetryPeriod` (upstream 2 s = 12 s / 10 s) and every controller
-exits when a renewal misses the deadline. On a clean bootstrap two etcd stalls of 13.6 s and 10.1 s restarted all four
-Kyverno controllers together (exit 0, `Failed to renew lease ... context deadline exceeded`), and the first hello-world
-build's `sign` pod was rejected with `no endpoints available for service "kyverno-svc"` in the 4 s before the new
-admission pod was Ready. `addons/kyverno` sets the period to 10 s (60 s lease, 50 s renew deadline) on every
-controller; the build templates' `sign` step retries pod-creation errors (`retryPolicy: OnError`, 4 attempts with
-backoff) as defence in depth. Check: `kubectl -n kyverno get lease` shows `leaseDurationSeconds: 60`.
+```bash
+docker inspect k3d-platform-mgmt-server-0 --format '{{.RestartCount}}'
+docker logs k3d-platform-mgmt-server-0 2>&1 | grep -c 'leaderelection lost'
+docker exec k3d-platform-mgmt-server-0 kubectl -n kube-system get lease k3s k3s-etcd \
+  -o custom-columns=NAME:.metadata.name,LEASE:.spec.leaseDurationSeconds
+kubectl --context k3d-platform-mgmt -n kyverno get lease
+```
 
 ## Bootstrap time and registry caches
 

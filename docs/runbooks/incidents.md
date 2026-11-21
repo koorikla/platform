@@ -2,7 +2,8 @@
 
 ## When to use
 
-Use this runbook during active platform or workload degradation: stuck Argo CD syncs, unreachable clusters, blocked promotions, Kyverno image denials, Critical Falco alerts, Argo Workflows controller crash loops, sealed OpenBao, or disconnected OpenChoreo data-plane agents. For broad initial triage across logs, metrics, and traces, start with [observability-first-look.md](observability-first-look.md).
+Use it while something is broken. Find the symptom in the table and follow that section's Steps, Verify and
+Rollback. If you do not know where to look yet, start with [observability-first-look.md](observability-first-look.md).
 
 ## Symptoms
 
@@ -19,7 +20,7 @@ Use this runbook during active platform or workload degradation: stuck Argo CD s
 
 ## Steps
 
-Identify the matching failure mode below and execute its **Steps**, **Verify**, and **Rollback** sequence.
+Each failure mode below has its own Steps, Verify and Rollback.
 
 ---
 
@@ -120,9 +121,9 @@ Identify the matching failure mode below and execute its **Steps**, **Verify**, 
   kubectl --kubeconfig dev1.kubeconfig get policyreport -A
   ```
   Fix the underlying cause (never weaken `production` to `Audit`):
-  - **Tag-only image (`requireDigest`)**: update the app `Workload` image to `<repo>:<tag>@sha256:<digest>` (the app-* workflows output `image_digest_ref`, [#16](https://github.com/koorikla/platform/issues/16)) and cut a new `ComponentRelease`.
+  - **Tag-only image (`requireDigest`)**: update the app `Workload` image to `<repo>:<tag>@sha256:<digest>` (the app-* workflows output `image_digest_ref`) and cut a new `ComponentRelease`.
   - **Repository or `workflowRef` mismatch**: add `owner/repo` to `imageVerification.github.repositories` in `installations/<inst>/addons/kyverno-policies/values.yaml` or align `workflowRef` with koorikla/platform tag `ci-v1`.
-  - **Harbor `apps/` image without `platformKey.publicKey`**: wire `cosign.pub` per [certificates-and-secrets.md](certificates-and-secrets.md) ([#15](https://github.com/koorikla/platform/issues/15)).
+  - **Harbor `apps/` image fails the platform-key check**: with no inline `publicKey`, the key comes from mgmt in ConfigMap `kyverno/platform-image-verification`. Check it exists on the cluster and that `ClusterResourceSet/<cluster>-image-verification` in `fleet` on mgmt is applied ([supply-chain.md](../supply-chain.md#wiring-the-key)).
   - **Webhook timeout (`context deadline exceeded`)**: a check of a digest not yet in Kyverno's verification cache takes ~5-10 s ([supply-chain.md "Admission latency"](../supply-chain.md#admission-latency)); much slower means the cluster's egress to `ghcr.io` / `tuf-repo-cdn.sigstore.dev` is degraded. The rollout retries; successful checks are cached per digest.
   - **Kyverno webhook down (`failurePolicy: Fail`)**: running production pods stay up and platform namespaces are excluded; restore `deploy/kyverno-admission-controller` in `kyverno`.
 - **Verify**: `bash hack/tests/test_kyverno_policies.sh` passes offline and `RenderedRelease` transitions to `Ready` on the production data plane.
@@ -164,11 +165,11 @@ Identify the matching failure mode below and execute its **Steps**, **Verify**, 
   $K -n openchoreo-workflow-plane get pods
   $K -n openchoreo-workflow-plane logs deploy/argo-workflow-controller --previous --tail=100
 
-  # Check active Workflows and the executor token Secret (required when automountServiceAccountToken=false, #101)
+  # Check active Workflows and the executor token Secret (pods mount it because automountServiceAccountToken=false)
   $K get workflows -A
   $K -n workflows-default get secret workflow-sa.service-account-token
   ```
-  - **Malformed `Workflow` spec crash-looping the informer/controller** (for example non-string env vars rendered by a `ClusterWorkflow`, [#99](https://github.com/koorikla/platform/issues/99)): delete the offending `Workflow` (`$K -n workflows-default delete workflow <name>`) to unblock the controller, then fix `addons/openchoreo-platform` or `addons/openchoreo-workflow-plane` in Git.
+  - **Malformed `Workflow` spec crash-looping the informer/controller** (for example non-string env vars rendered by a `ClusterWorkflow`): delete the offending `Workflow` (`$K -n workflows-default delete workflow <name>`) to unblock the controller, then fix `addons/openchoreo-platform` or `addons/openchoreo-workflow-plane` in Git.
   - **Pods stuck in `Init`**: ensure `openchoreo-workflow-plane-mgmt` is `Synced` so `Secret/workflow-sa.service-account-token` exists in `workflows-default`.
 - **Verify**: `$K -n openchoreo-workflow-plane rollout status deploy/argo-workflow-controller --timeout=120s` succeeds.
 - **Rollback**: `git revert` the `ClusterWorkflow` or `openchoreo-workflow-plane` commit that introduced the invalid spec.
@@ -214,7 +215,7 @@ Identify the matching failure mode below and execute its **Steps**, **Verify**, 
   kubectl --kubeconfig dev1.kubeconfig -n openchoreo-data-plane get pods,secret,configmap
   kubectl --kubeconfig dev1.kubeconfig -n openchoreo-data-plane logs deploy/cluster-agent-dataplane --tail=80
   ```
-  - **Renewed client or gateway CA certificate ([#50](https://github.com/koorikla/platform/issues/50))**: verify `ClusterResourceSet/dev1-openchoreo-agent` on mgmt (`$K -n fleet get clusterresourceset dev1-openchoreo-agent`), then restart the agent so it reloads `cluster-agent-tls` ([openchoreo.md](../openchoreo.md#trust-model)):
+  - **Renewed client or gateway CA certificate**: Reloader should have rolled the agent. Check `ClusterResourceSet/dev1-openchoreo-agent` on mgmt (`$K -n fleet get clusterresourceset dev1-openchoreo-agent`) and `kubectl --kubeconfig dev1.kubeconfig -n reloader logs deploy/reloader --tail=20`, then restart the agent by hand ([openchoreo.md](../openchoreo.md#trust-model)):
     ```bash
     kubectl --kubeconfig dev1.kubeconfig -n openchoreo-data-plane rollout restart deploy/cluster-agent-dataplane
     ```
@@ -223,7 +224,7 @@ Identify the matching failure mode below and execute its **Steps**, **Verify**, 
     ```bash
     $K -n default annotate renderedrelease --all platform.koorikla.io/kick="$(date +%s)" --overwrite
     ```
-  - **New cluster, agent pod never created ([#246](https://github.com/koorikla/platform/issues/246))**: the `capability-gate` Sync hook waits for the CRDs of the cluster's opt-in addons (KEDA; the PostgreSQL XRD from crossplane's Configuration package, #255) before the agent starts; the pending init container `wait-for-<addon>-crds` names the addon; fix it (`keda-<cluster>` / `crossplane-<cluster>` app, `kubectl get configuration.pkg` for a failed package pull), then check `kubectl --kubeconfig dev1.kubeconfig -n openchoreo-data-plane logs job/capability-gate --all-containers`.
+  - **New cluster, agent pod never created**: the `capability-gate` Sync hook waits for the CRDs of the cluster's opt-in addons (KEDA; the PostgreSQL XRD from crossplane's Configuration package) before the agent starts; the pending init container `wait-for-<addon>-crds` names the addon; fix it (`keda-<cluster>` / `crossplane-<cluster>` app, `kubectl get configuration.pkg` for a failed package pull), then check `kubectl --kubeconfig dev1.kubeconfig -n openchoreo-data-plane logs job/capability-gate --all-containers`.
 - **Verify**: `$K get clusterdataplane dev1` is connected and `$K -n default get renderedreleases` shows `Ready`.
 - **Rollback**: if an `openchoreo.controlPlane.clusterGatewayURL` or gateway route edit broke connectivity, `git revert` the commit on `main`.
 

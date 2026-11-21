@@ -105,13 +105,13 @@ Also prepare:
 | 1 | Clean bootstrap | 3 | live |
 | 2 | Add a cluster by adding a file | 4 | live; AWS, Hetzner and GKE are untested, render-only examples; EKS, AKS and Talos are not planned (#88-#90) |
 | 3 | Developer self-service | 3 | console and the six golden-path templates live; running one needs a GitHub org (#109) |
-| 4 | Build and supply chain | 5 | live: in-cluster build (#17), signature, live deny |
-| 5 | Deploy and promote | 5 | live, production through the promotion gate (#54); the weekend freeze holds production PENDING |
+| 4 | Build and supply chain | 5 | live: in-cluster build, signature, live deny |
+| 5 | Deploy and promote | 5 | live, production through the promotion gate; the weekend freeze holds production PENDING |
 | 6 | Observe | 3 | logs/metrics/traces live; alert-rule trait `observability-alert-rule` allowed on the component types |
 | 7 | Runtime security | 3 | live |
-| 8 | Zero trust | 2 | live (OpenBao mesh CA on mgmt, istio-csr on dev1; #19); app secrets from each project's own OpenBao mount (#96, #250) |
+| 8 | Zero trust | 2 | live (OpenBao mesh CA on mgmt, istio-csr on dev1); app secrets from each project's own OpenBao mount |
 | 9 | App with a database | 2 | live on dev1 (CloudNativePG); RDS / Cloud SQL / Flexible Server render-only (#107) |
-| 10 | PR preview environment | 4 | live (#168); the build takes ~6 min, so open the PR before the demo |
+| 10 | PR preview environment | 4 | live; the build takes ~6 min, so open the PR before the demo |
 
 ## 1. Clean bootstrap
 
@@ -297,8 +297,7 @@ Talking points:
 - The automated gate checks pipeline order, readiness, a smoke test, the observer and the freeze window, then opens
   the production PR with a commit status; a human release manager merges it.
 
-Fallback: production serving hello-world needs a passing gate run that promotes a digest release (proven live in
-#54, with the gate's GitHub App from #10); in a freeze window it stays PENDING until the window ends. Show the gate WorkflowRun in the console (Workflows ->
+Fallback: production serving hello-world needs a passing gate run that promotes a digest release; in a freeze window it stays PENDING until the window ends. Show the gate WorkflowRun in the console (Workflows ->
 promotion-gate), its PR if one exists, and the production ReleaseBinding condition (denied tag-only image) as proof
 that production refuses what is not verified.
 

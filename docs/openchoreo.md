@@ -85,8 +85,8 @@ ClusterDataPlane (wave 10). On a clean bootstrap the tenant's bindings exist lon
 - Thunder's PVCs are hooks Argo CD can delete: the upstream chart hardcodes them as `pre-install` hooks (they must
   exist before the PreSync setup Job mounts them), and an Argo hook always has a delete policy (none =
   BeforeHookCreation, i.e. every sync). They keep `hook-failed`, so a successful sync never touches them, but a failed
-  PreSync phase made Argo delete them (setup outage after PR #5: claims Terminating, kept only by the running pod).
-  Since then the PVCs carry `platform.koorikla.io/delete-protection: enabled` and the PreSync hook VAP
+  PreSync phase makes Argo delete them (claims Terminating, kept only by the running pod).
+  So the PVCs carry `platform.koorikla.io/delete-protection: enabled` and the PreSync hook VAP
   `thunder-pvc-delete-protection` (weight -30, before-hook-creation only, so it outlives a failed sync) denies their
   DELETE for everyone, Argo CD included. Break-glass, to really drop Thunder's data:
   `kubectl -n thunder annotate pvc <name> platform.koorikla.io/delete-protection-`, then delete. Verify the policy:
@@ -190,7 +190,6 @@ Thunder users: `admin@openchoreo.dev` (group `admins` -> OpenChoreo role admin) 
 
 ### Developer access is per project
 
-Since #335:
 - Group `developers` (every developer) gets org-wide READ-ONLY roles `cluster-reader` + `namespace-reader` (addon
   openchoreo-control-plane `developer-binding`; upstream gives it role `developer`, i.e. write access to every project).
 - Each tenant's `developerGroups` (tenant file, default `<project>-developers`) get role `developer` scoped to that
@@ -201,7 +200,7 @@ Since #335:
   per entitlement value, so project groups carry their production exclusion in their own binding.
 - Onboarding a developer = add them to `developers` and to the project's group in the IdP. `developerGroups` may not
   list `developers` (chart validation: that would reopen the project to everyone).
-- `SecretReference` is namespace-level in OpenChoreo, so developers no longer create them through the API: app repos
+- `SecretReference` is namespace-level in OpenChoreo, so developers do not create them through the API: app repos
   sync them from git ([App repo contract](#app-repo-contract)).
 
 ### Application secrets (developer view)
