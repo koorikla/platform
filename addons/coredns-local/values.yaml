@@ -1,22 +1,5 @@
-# k3s's CoreDNS imports the optional ConfigMap kube-system/coredns-custom: keys *.override go into the default `.:53`
-# server block, *.server become extra server blocks. k3s does not own that ConfigMap, so Argo can.
-# One rule: every name under openchoreo.controlPlane.host (and the host itself) is answered with the address of
-# `rewrite.target`; `answer auto` renames the answer back to the queried name. The regex is anchored on the FQDN so
-# search-path expansions (x.openchoreo.localhost.<ns>.svc.cluster.local.) and look-alikes pass through untouched.
-# Same URLs for pods and browsers: http(s)://<x>.openchoreo.localhost:8080|8443.
-#
-# Target per role (values/role-*.yaml):
-#   mgmt      -> the control-plane Gateway Service (in-cluster; `rewrite` runs before the `kubernetes` plugin)
-#   workload  -> the k3d serverlb container of the mgmt cluster on docker network `kind` (resolved by Docker's embedded
-#                DNS, which kindest/node's CoreDNS forwards to); it publishes 8080/8443 to the mgmt gateway.
-# Observability plane names (only with openchoreo.observability.enabled): observer.<host> and *.observability.<host>
-# (OTLP, remote write, OpenSearch) live on the obs-plane Gateway (ports 11080/11085), not the control-plane one:
-#   mgmt      -> observabilityRewrite.target, a rule placed before the generic one (`rewrite stop`: first match wins)
-#   workload  -> no extra rule: the generic rule already sends them to the k3d serverlb, which publishes 11080/11085.
-# Registry (installation.yaml registry.type harbor; addons/harbor): its host (e.g. harbor.openchoreo.localhost)
-#   mgmt      -> registryRewrite.target, Harbor's Gateway Service (port == listener == published port), first rule
-#   workload  -> the generic rule (k3d serverlb publishes the registry port). containerd on CAPD nodes does not use
-#                CoreDNS: the ClusterClass writes an /etc/hosts alias there (variable registryHostAlias).
+# Answers every name under openchoreo.controlPlane.host with the address of `rewrite.target`, through k3s's optional
+# ConfigMap kube-system/coredns-custom. Targets per role and name: README.md "Design notes".
 
 # Catalog providers: [docker, byo]. A byo cluster brings its own DNS, so values/provider-byo.yaml turns this off; the
 # local installation turns it back on (installations/local/addons/coredns-local/values.yaml): its byo clusters are k3d

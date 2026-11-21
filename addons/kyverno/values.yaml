@@ -85,27 +85,14 @@ kyverno:
       resources:
         requests: { cpu: 50m, memory: 128Mi }
         limits: { memory: 384Mi }
-      # Image verification cache (#136, docs/supply-chain.md "Admission latency"). A keyless verification costs ~5 s
-      # (Kyverno 1.20 refreshes the Sigstore TUF metadata and walks the image's registry referrers on every call); a
-      # cached one ~0. Kyverno caches only SUCCESSFUL verifications, only of digest references (repo:tag@sha256:...),
-      # keyed by that reference + the attestor's full definition (identity, extensions, Rekor) + the attestation type:
-      # a tag, a failed verification, another policy identity or another digest is always verified again. Set
-      # explicitly (not chart defaults) so the trade-off is reviewed here:
-      #   TTL 24h       an image verified in staging (same attestors, so the same cache entries) is still cached when
-      #                 its production promotion is approved that day. The TTL also bounds how long a Sigstore
-      #                 trust-root change (revoked Fulcio/Rekor key) takes to reach digests verified before it; deleting
-      #                 the admission controller pod flushes the cache (in-memory, per replica).
-      #   max 32 MiB    entries are charged their attestation payloads, ~1 MiB per image (the SPDX SBOM dominates):
-      #                 ~30 images per replica; the default 10 MiB evicts after ~10.
+      # Image verification cache: a keyless verification costs ~5 s, a cached one ~0. TTL 24h keeps staging-verified
+      # digests cached for that day's production promotion; 32 MiB holds ~30 images (docs/supply-chain.md "Admission latency").
       extraArgs:
         imageVerifyCacheEnabled: true
         imageVerifyCacheTTLDuration: 24h
         imageVerifyCacheMaxSize: "33554432"   # bytes, quoted: helm renders a bare number as 3.3554432e+07
-        # Leader election: Kyverno derives lease = 6x and renew deadline = 5x this period (upstream 2s -> 12s/10s). Every
-        # controller exits when a renewal misses the deadline, and the admission webhook (failurePolicy Fail) then has no
-        # endpoints until the new pod is Ready: on a clean bootstrap etcd fdatasync stalls of 10-14 s restarted all four
-        # controllers together twice and failed the first build's `sign` pod creation. 10s -> 60s lease, 50s renew
-        # deadline, like k3s/CAPI (docs/dev-environment.md "Leader election on slow disks"). Same value on every controller.
+        # Lease = 6x, renew deadline = 5x this period (upstream 2s): rides out bootstrap etcd stalls that restarted every
+        # controller (docs/dev-environment.md "Leader election on slow disks"). Same value on every controller.
         leaderElectionRetryPeriod: &kyvernoLeaderElectionRetryPeriod 10s
   backgroundController:
     replicas: 1

@@ -35,6 +35,12 @@ Wrapper chart for `strimzi-kafka-operator` (`1.3.1`) on workload clusters. Manag
 | strimzi-kafka-operator.userOperator.image.tag | string | `"1.3.1@sha256:55f43849559a0d151be473c588c89e9d72649ecadf088c8b9d92d37654a5e5eb"` |  |
 | strimzi-kafka-operator.watchAnyNamespace | bool | `true` | `true` so dynamically created OpenChoreo cell namespaces are reconciled. |
 
+### Design notes
+
+- **Strimzi 1.x:** KRaft only; Kafka / KafkaNodePool / KafkaTopic / KafkaUser in `kafka.strimzi.io/v1`. CRDs come from the chart's `crds/` and are applied server-side (the Kafka CRD is too large for client-side apply).
+- **Watch scope:** all namespaces (cell namespaces `dp-*` appear at runtime). The operator can therefore manage Pods, Services, Secrets, ConfigMaps, PVCs, NetworkPolicies, PDBs and Roles in every namespace. Restrict with `watchNamespaces` + `watchAnyNamespace: false` in an installation overlay when Kafka clusters live in known namespaces.
+- **Images:** multi-arch, pinned by digest (operator, kafka-init, Kafka Bridge, builders). Broker images follow `spec.kafka.version` by tag; pin one with `spec.kafka.image` ([example](../../docs/data-services.md)).
+
 ## Day-2 notes
 
 - Operator upgrades and workload cluster sizing: [upgrades](../../docs/runbooks/upgrades.md#3-addon-chart-bumps-and-staged-rollout-addonsrevision) and [scaling and capacity](../../docs/runbooks/scaling-and-capacity.md).

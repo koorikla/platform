@@ -188,6 +188,23 @@ Wrapper chart for Harbor (`1.19.4` / `v2.15.4`) on `mgmt`. Hosts the `apps` proj
 | secrets.secretName | string | `"harbor-platform"` |  |
 | secrets.store | string | `"platform"` | Pulls Harbor admin, robot, and component credentials (`secrets.{store,remoteKey,ghcrKey,secretName}`) from `ClusterSecretStore/platform`. |
 
+### Design notes
+
+| Object | What it is |
+|---|---|
+| `harbor` (upstream chart) | HTTPRoute (`expose.type: route`), core, portal, jobservice, registry, internal PostgreSQL + Redis, Trivy (scan on push). No notary/exporter/metrics. |
+| `templates/gateway.yaml` | Gateway `harbor` (HTTPS 9443, TLS terminated) + timeouts for the chart HTTPRoute |
+| `templates/pki.yaml` | Registry CA scoped to ns harbor (Issuer `harbor-ca`) -> `harbor-tls`; `harbor-token` (core token-signing cert); `harbor-ca-bundle` (ca.crt only) |
+| `templates/ca-store.yaml` | ClusterSecretStore `mgmt-harbor`: name-scoped GET of `harbor-ca-bundle` only (for CAPI node bootstrap data and build pods; no private key is read) |
+| `templates/secrets.yaml` | Secret `harbor-platform` from ClusterSecretStore `platform` (key `harbor`, plus `platform-ghcr`) |
+| `templates/config.yaml` | Harbor has no CRDs: a PostSync Job + CronJob apply `files/harbor-config.py` to the desired state in `config` (projects, proxy caches, replication, robot accounts, empty CVE allowlist). Idempotent. |
+
+- **Images:** Harbor v2.15 publishes linux/amd64 only. On arm64 hosts set `registry.type: external` and disable this addon ([Registry](../../docs/build-plane.md)).
+- **Endpoint** `https://<registry.host>`, e.g. `https://harbor.openchoreo.localhost:9443`. Harbor's token realm is `externalURL`, so the same name must resolve everywhere:
+  - host browser: k3d publishes 127.0.0.1:9443 -> klipper hostPort of the Gateway Service;
+  - mgmt pods: coredns-local rewrites the name to `harbor.harbor.svc.cluster.local`;
+  - CAPD nodes: `/etc/hosts` alias to the k3d serverlb (ClusterClass variable `registryHostAlias`); k3s `registries.yaml` trusts the CA.
+
 ## Day-2 notes
 
 - Values are checked by `values.schema.json` (`registry.host` format, `secrets.store` and other platform keys; `helm` prints the failing path). `registry.type` other than `harbor` and cross-field rules (upstream literals vs `registry.host`, gateway, token Secret, proxy-cache endpoints) are in `templates/validate.yaml`.

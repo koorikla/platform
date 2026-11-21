@@ -22,8 +22,7 @@ mgmt:
 
 secrets:
   backend: vault                              # ClusterSecretStore/platform -> Vault / OpenBao (secret-stores has no
-  githubGateApp:                              # platform GitHub App (store key promotion-gate-github, docs/forking.md)
-    enabled: false                            # true once the key is in the store: auto-build, PR previews
+  # githubGateApp: {enabled: true}             # once store key promotion-gate-github exists: auto-build, PR previews
   vault:                                      # GCP Secret Manager backend yet)
     server: https://vault.gcp.example.com     # VERIFY shape vs addons/secret-stores
     path: platform                            # KV v2 mount
@@ -55,7 +54,6 @@ capi:
     serviceAccount: capg-manager@platform-example.iam.gserviceaccount.com                                                # VERIFY
 
 openchoreo:
-  orgNamespace: default
   controlPlane:
     host: openchoreo.gcp.example.com
     clusterGatewayURL: wss://cluster-gateway.openchoreo.gcp.example.com/ws   # VERIFY port/path with OC 1.3.3

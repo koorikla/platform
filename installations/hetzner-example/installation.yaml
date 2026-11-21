@@ -21,8 +21,7 @@ mgmt:
 
 secrets:
   backend: vault                              # ClusterSecretStore/platform -> Vault / OpenBao (no native manager)
-  githubGateApp:                              # platform GitHub App (store key promotion-gate-github, docs/forking.md)
-    enabled: false                            # true once the key is in the store: auto-build, PR previews
+  # githubGateApp: {enabled: true}             # once store key promotion-gate-github exists: auto-build, PR previews
   vault:
     server: https://vault.hetzner.example.com # VERIFY shape vs addons/secret-stores
     path: platform                            # KV v2 mount
@@ -55,7 +54,6 @@ capi:
     hetzner: true                             # CAPH v1.1.12; token: key capi-hetzner (property hcloud)
 
 openchoreo:
-  orgNamespace: default
   controlPlane:
     host: openchoreo.hetzner.example.com
     clusterGatewayURL: wss://cluster-gateway.openchoreo.hetzner.example.com/ws   # VERIFY port/path with OC 1.3.3

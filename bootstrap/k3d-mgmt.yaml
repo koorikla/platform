@@ -1,14 +1,12 @@
-# k3d configuration for the local management cluster (platform-mgmt).
-# Joins docker network "kind" so CAPD workload containers and k3d-platform-mgmt-serverlb share DNS/routing.
-# Mounts /var/run/docker.sock so the in-cluster CAPD controller can manage workload Docker containers.
+# Local management cluster platform-mgmt (`bootstrap/bootstrap.sh up`). On docker network kind next to the CAPD
+# workload clusters, with the docker socket mounted so CAPD can create their containers.
 apiVersion: k3d.io/v1alpha5
 kind: Simple
 metadata:
   name: platform-mgmt
 servers: 1
 agents: 0
-# Same k3s as the workload clusters (OpenChoreo CRDs need a recent API server, CEL); fully qualified and pinned by
-# multi-arch index digest (amd64, arm64, arm). VERIFY on the next `task up` (k3d passes the reference to docker as is).
+# Same k3s as the workload clusters, pinned by multi-arch index digest.
 image: docker.io/rancher/k3s:v1.35.10-k3s1@sha256:8262ca99a558dca0c0437443421986480b2359f9118f2371359f88a41514522f
 network: kind
 options:
@@ -19,24 +17,17 @@ options:
       - arg: --disable=traefik
         nodeFilters:
           - server:*
-      # Embedded etcd instead of kine/SQLite even with one server: the SQLite datastore of a busy mgmt (Argo CD, CAPI,
-      # OpenChoreo, Workflows) grew to ~1.8 GB and kine's compaction failed at the same revision on every start, a
-      # crash loop every ~11 min (#76). etcd compacts incrementally. k3d adds this flag itself only when servers > 1.
+      # Embedded etcd even with one server: kine/SQLite compaction failed on a busy mgmt and crash-looped k3s (#76).
       - arg: --cluster-init
         nodeFilters:
           - server:0
-      # No fsync in the mgmt etcd (#344): this host-shared disk stalled WAL and bolt fsyncs past 8 s and one apply for
-      # 29-31 s during a clean bootstrap; a stall over 30 s makes k3s exit ("leaderelection lost for k3s") and Docker
-      # restarts every mgmt pod. A container restart keeps the host page cache; only a host/VM crash can lose recent
-      # writes, and the lab is rebuilt with `task down up` then. Inside the container, so the same on every Docker host.
+      # No fsync in the mgmt etcd: fsync stalls over 30 s made k3s exit during bootstrap (#344). Only a host crash can
+      # lose recent writes, and the lab is then rebuilt with `task down up`.
       - arg: --etcd-arg=unsafe-no-fsync=true
         nodeFilters:
           - server:0
-      # Longer leader election for the embedded controllers, to ride out slow etcd fsyncs. k3s exits on a missed renewal
-      # ("leaderelection lost"), and the clean bootstrap's I/O burst (CAPD nodes, Harbor, image pulls) stalls etcd
-      # fdatasync for 5-8 s on a busy host: 5 mgmt restarts in the first 15 min, each restarting every mgmt pod.
-      # Upstream 15s/10s/2s. Same values as the CAPD ClusterClass (charts/cluster k3s.dockerLeaderElectionArgs,
-      # #82; hack/tests/test_gitops_contracts.sh keeps them equal).
+      # Longer leader election (upstream 15s/10s/2s) rides out bootstrap I/O stalls; equal to charts/cluster
+      # k3s.dockerLeaderElectionArgs (#82, kept equal by hack/tests/test_gitops_contracts.sh).
       - arg: --kube-controller-manager-arg=leader-elect-lease-duration=60s
         nodeFilters: [server:*]
       - arg: --kube-controller-manager-arg=leader-elect-renew-deadline=40s
@@ -55,8 +46,7 @@ options:
         nodeFilters: [server:*]
       - arg: --kube-cloud-controller-manager-arg=leader-elect-retry-period=10s
         nodeFilters: [server:*]
-# k3s's own leases ("k3s", "k3s-etcd") come from wrangler, not the args above: upstream 45 s lease / 30 s renew
-# deadline, exit on a missed renewal (#344). One server, so nothing fails over: ride out 90 s stalls instead.
+# k3s's own leases (wrangler, upstream 45 s / 30 s): one server, nothing fails over, so ride out 90 s stalls (#344).
 env:
   - envVar: CATTLE_ELECTION_LEASE_DURATION=120s
     nodeFilters: [server:*]
@@ -84,13 +74,11 @@ ports:
   - port: 127.0.0.1:11085:11085
     nodeFilters:
       - loadbalancer
-  # Harbor registry (Gateway `harbor` in ns harbor, TLS from the mgmt registry CA): UI, docker login/push/pull at
-  # https://harbor.openchoreo.localhost:9443. CAPD nodes reach the same port on this load balancer over network kind.
+  # Harbor registry: UI and docker login/push/pull at https://harbor.openchoreo.localhost:9443 (CAPD nodes too).
   - port: 127.0.0.1:9443:9443
     nodeFilters:
       - loadbalancer
-  # OpenBao, the Istio mesh CA (Gateway in ns openbao, TLS passthrough, installation.yaml mesh.ca.port): CAPD mesh
-  # members reach it on this load balancer over network kind (coredns-local), the host only for debugging.
+  # OpenBao, the Istio mesh CA (installation.yaml mesh.ca.port): for CAPD mesh members; the host only for debugging.
   - port: 127.0.0.1:8200:8200
     nodeFilters:
       - loadbalancer

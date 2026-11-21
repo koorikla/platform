@@ -7,5 +7,4 @@ postgresql:
     subnetIds: [subnet-0123456789abcdef1, subnet-0123456789abcdef2]
     nodeSecurityGroupId: sg-0123456789abcdef3
     identity:
-      source: IRSA
       roleArn: arn:aws:iam::111111111111:role/platform-crossplane-postgresql

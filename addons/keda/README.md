@@ -54,6 +54,18 @@ Wrapper chart for KEDA (`2.21.0`) on workload clusters. Provides event-driven au
 | namespace.ambient | bool | `true` |  |
 | namespace.podSecurity | string | `"restricted"` | `restricted` Pod Security admission label on namespace `keda`. |
 
+### Design notes
+
+| Component | Role |
+|---|---|
+| `keda-operator` | Reconciles ScaledObject / ScaledJob / TriggerAuthentication; owns one HPA per ScaledObject and scales 0 <-> 1 itself |
+| `keda-operator-metrics-apiserver` | Serves `external.metrics.k8s.io` (one APIService per cluster: nothing else may register it) |
+| `keda-admission-webhooks` | Rejects a ScaledObject whose target already has an HPA (e.g. the OpenChoreo `horizontal-pod-autoscaler` trait) and duplicates |
+
+- **Scope:** all namespaces (cell namespaces `dp-*` appear at runtime). The operator reads every workload's `/scale` subresource and Secrets only through TriggerAuthentication references.
+- **Certificates:** cert-manager instead of the operator patching caBundles itself, so no controller rewrites the webhook/APIService behind Argo CD.
+- **Metrics:** ServiceMonitors for all three components, scraped by addon telemetry's Prometheus agent (needs its CRDs on the same cluster).
+
 ## Day-2 notes
 
 - Workload capacity planning and addon upgrades: [scaling and capacity](../../docs/runbooks/scaling-and-capacity.md) and [upgrades](../../docs/runbooks/upgrades.md#3-addon-chart-bumps-and-staged-rollout-addonsrevision).

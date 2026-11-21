@@ -6,11 +6,8 @@ region: local
 environment: development    # cluster tier (selects addon env-<environment>.yaml); app environments: openchoreo below
 kubernetesVersion: v1.35.10+k3s1
 controlPlane:
-  # 1 server: host RAM (each extra CAPD k3s server costs ~1-2 GiB with its etcd and addons). Disposable: a control-plane
-  # rollout ends with an etcd 2 -> 1 member removal that can lose quorum (break-glass in docs/providers.md).
-  # HA mode: set `replicas: 3` (odd only; 5 for more tolerance). A rollout then goes 3 -> 4 -> 3 voters and never through
-  # a 2-voter cluster, and KCP remediates unhealthy servers (only from 3 up). Nothing else changes: the ClusterClass
-  # joins the extra servers to the embedded etcd, and production clusters on aws/hetzner are forced to >= 3.
+  # 1 server to save host RAM; a rollout can lose etcd quorum (break-glass in docs/providers.md).
+  # HA: `replicas: 3` (odd only); production clusters on aws/hetzner are forced to >= 3.
   replicas: 1
 workers:
   - name: md-0
@@ -19,18 +16,14 @@ openchoreo:
   dataPlane:
     enabled: true
     gatewayHost: dev1.apps.localhost
-    # Lean local profile: one workload cluster, one namespace per environment (OpenChoreo cells dp-<org>-<project>-<env>-*).
-    # Gates, freeze windows and Kyverno's per-environment policies follow the environment, not the cluster.
+    # Lean local profile: one workload cluster, one namespace per environment; gates and policies follow the environment.
     # Multicluster: prod1.yaml.disabled (docs/dev-environment.md "Local profiles").
     environments: [development, staging, production]
 mesh:
   group: local              # east-west connectivity with the other members (docs/multicluster.md)
 addonsRevision: HEAD
-# Data services (docs/data-services.md): PostgreSQL as a service (Crossplane + the cnpg Composition, #107) and KEDA
-# (~160Mi requests). Also the capabilities OpenChoreo checks: ClusterDataPlane annotations addons.platform.koorikla.io/*
-# let the keda-scaler trait and postgresql resource type target this cluster's environments (#70).
-# moco (#256): the MySQL operator (one pod, 100m / 20Mi requests) + the MySQL API in crossplane; no MySQL instance runs
-# until a Resource of type mysql is bound (each adds a mysqld pod, 512Mi request at size S).
+# Data services (docs/data-services.md): PostgreSQL (cloudnative-pg), MySQL (moco) via crossplane, and KEDA. The
+# ClusterDataPlane annotations addons.platform.koorikla.io/* tell OpenChoreo which traits and resource types fit here.
 addons:
   cloudnative-pg: true
   moco: true

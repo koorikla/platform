@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Idempotent bootstrap entrypoint for koorikla/platform.
-# Usage: bootstrap/bootstrap.sh [--inst <name>] [up|secrets|argocd|status|down]
+# Day-1 entry point (`task up`). Idempotent; --help lists the subcommands, docs/dev-environment.md the walkthrough.
+#   up = k3d cluster platform-mgmt (local only) -> secrets -> Argo CD + root app -> ESO takes over repo creds -> status
+# After the root app, Argo CD owns everything (charts/platform); this script only seeds what must exist before it.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 # shellcheck source=../hack/lib/portable.sh
@@ -53,6 +54,8 @@ INST_FILE="installations/${INST}/installation.yaml"
 log()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m==> WARN:\033[0m %s\n' "$*"; }
 die()  { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
+
+# --- installation facts and tools --------------------------------------------------------------------------------
 
 load_inst() {
   local -a _inst=()
@@ -114,11 +117,10 @@ ensure_k3d() {
   kubectl --context "$CTX" wait --for=condition=Ready node --all --timeout=3m >/dev/null
 }
 
-# Every object bootstrap writes goes through kapply: server-side apply with its own field manager. Fields it stops
-# sending are pruned (switching platform-github from token to GitHub App leaves no stale token) and, unlike client-side
-# apply, no kubectl.kubernetes.io/last-applied-configuration copy of the data is written. Objects an older bootstrap
-# wrote client-side are migrated by kubectl on first contact (their field ownership moves to platform-bootstrap and the
-# re-apply drops the old annotation).
+# --- writing objects ----------------------------------------------------------------------------------------------
+
+# Server-side apply with its own field manager: fields no longer sent are pruned (no stale token after a switch to a
+# GitHub App) and no last-applied-configuration copy of secret data is written.
 kapply() {
   kubectl --context "$CTX" apply --server-side --field-manager=platform-bootstrap --force-conflicts -f - >/dev/null
 }
@@ -132,9 +134,8 @@ ensure_namespace() {
 #   key=@FILE           data key from the content of FILE
 #   label:key=VAR       metadata label / annotation from shell variable VAR
 #   annotation:key=VAR
-# yq gets each value through its environment (readable only by the same user) or reads the file itself, so no secret
-# value is ever a process argument (/proc/<pid>/cmdline, `ps`: readable by every local user). Works in Git Bash too
-# (no process substitution, no temp files).
+# Values reach yq through its environment or a file it reads itself: never a process argument (`ps` shows argv to every
+# local user). Git Bash safe: no process substitution, no temp files.
 secret_manifest() {
   local __sm_ns=$1 __sm_name=$2 __sm_spec __sm_key __sm_ref __sm_val __sm_path __sm_expr __sm_i=0
   local __sm_filter='.apiVersion = "v1" | .kind = "Secret" | .metadata.name = strenv(NAME) | .metadata.namespace = strenv(NS) | .type = "Opaque"'
@@ -163,6 +164,17 @@ secret_manifest() {
 apply_secret() {
   secret_manifest "$@" | kapply
 }
+
+# apply_github_app_secret <secret> <VAR prefix>: platform-secrets/<secret> from <prefix>_ID, <prefix>_INSTALLATION_ID
+# and <prefix>_PRIVATE_KEY_FILE (checked by require_app_env).
+apply_github_app_secret() {
+  local name=$1 id="$2_ID" installation="$2_INSTALLATION_ID" key_file="$2_PRIVATE_KEY_FILE"
+  apply_secret platform-secrets "$name" githubAppID="$id" githubAppInstallationID="$installation" \
+    githubAppPrivateKey=@"${!key_file}"
+  log "  $name: GitHub App ${!id}, installation ${!installation}"
+}
+
+# --- GitHub credentials -------------------------------------------------------------------------------------------
 
 # require_app_env <ID var> <INSTALLATION_ID var> <PRIVATE_KEY_FILE var>: all three set, key file readable (and, on
 # POSIX hosts, not readable by group/others).
@@ -248,10 +260,8 @@ get_secret_yaml() {
   kubectl --context "$CTX" -n "$1" get secret "$2" --ignore-not-found -o yaml
 }
 
-# drop_stale_ghcr <nodeRegistryAuth true|false>: no GHCR credential this run, but an earlier run may have left
-# platform-ghcr. A gh CLI copy (annotation seeded-from=gh, or a gho_ token from before the annotation existed) is
-# deleted when no node needs it; while nodeRegistryAuth is on, new nodes do need it, so it is kept and reported, as is
-# any secret the user seeded.
+# drop_stale_ghcr <nodeRegistryAuth true|false>: no GHCR credential this run. An earlier gh CLI copy (annotation
+# seeded-from=gh or a gho_ token) is deleted unless nodes still need it; a user-seeded one is kept and reported.
 drop_stale_ghcr() {
   local doc from tok
   doc=$(get_secret_yaml platform-secrets platform-ghcr) \
@@ -273,16 +283,15 @@ drop_stale_ghcr() {
   fi
 }
 
+# --- generated secrets --------------------------------------------------------------------------------------------
+
+# rand_alnum [length 24, max ~80]. openssl, not `tr </dev/urandom | head`: pipefail turns tr's SIGPIPE into exit 141.
 rand_alnum() {
-  # openssl, not `tr </dev/urandom | head`: under pipefail the reader closing early kills tr with SIGPIPE (exit 141).
-  # $1 = length (default 24, max ~80).
   openssl rand -base64 96 | LC_ALL=C tr -dc 'A-Za-z0-9' | cut -c1-"${1:-24}"
 }
 
-# seed_generated_secret <secret> <key>[=<fixed value>|=@strong|=@<length>] ...
-# Generates each missing property once (random alphanumeric; @strong adds upper/lower/digit/special for password
-# policies like OpenSearch 3 and Harbor; @<length> exact length; @hex32 = 32 random bytes in hex), keeps existing values
-# on re-runs.
+# seed_generated_secret <secret> <key>[=<fixed value>|=@strong|=@<length>|=@hex32] ...: generates each missing
+# property once and keeps existing values on re-runs. @strong satisfies upper/lower/digit/special password policies.
 seed_generated_secret() {
   local name=$1 existing; shift
   existing=$(get_secret_yaml platform-secrets "$name") \
@@ -336,9 +345,8 @@ seed_openbao_secret() {
   seed_generated_secret openbao-unseal key=@hex32
 }
 
-# Platform cosign key pair for in-cluster builds (key cosign-platform: cosign.key [encrypted], cosign.pub,
-# cosign.password). Generated once with cosign from the ci-toolbox image (ci/toolbox) (no host install); the private key
-# only ever exists in this Secret (and the build pods that mount it). Admission policies trust cosign.pub.
+# Platform cosign key pair for in-cluster builds, generated once with the ci-toolbox image (no host install). The private
+# key only ever exists in this Secret and the build pods; admission policies trust cosign.pub.
 COSIGN_IMAGE="ghcr.io/koorikla/platform/ci-toolbox:db7bcac@sha256:e22cd9dd65b56545ae988f84614a426192c0957a35612d77fabddb403f186858"
 COSIGN_TMP=""
 # shellcheck disable=SC2034  # cosign_pass is read by apply_secret through its name
@@ -357,10 +365,8 @@ seed_cosign_secret() {
   trap 'rm -rf "$COSIGN_TMP"' EXIT
   cosign_pass=$(rand_alnum 32)
   log "  cosign-platform: generating the platform cosign key pair"
-  # The password reaches docker and cosign only through the environment (-e NAME, no value in argv).
-  # Git Bash rewrites POSIX-looking arguments of native programs (`-w /keys` would become C:/Program Files/Git/keys
-  # and the bind mount a `;`-joined path list): MSYS_NO_PATHCONV / MSYS2_ARG_CONV_EXCL switch that off (no-ops
-  # elsewhere), and native_path hands docker.exe the host dir as C:/Users/... itself.
+  # The password reaches cosign only through the environment. MSYS_* stop Git Bash rewriting `/keys` into a Windows
+  # path (no-ops elsewhere); native_path gives docker.exe the host dir as C:/Users/....
   COSIGN_PASSWORD="$cosign_pass" MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' \
     docker run --rm -u "$(id -u):$(id -g)" -e COSIGN_PASSWORD \
     -v "$(native_path "$COSIGN_TMP"):/keys" -w /keys --entrypoint cosign "$COSIGN_IMAGE" generate-key-pair >/dev/null
@@ -370,11 +376,8 @@ seed_cosign_secret() {
   trap - EXIT
 }
 
-# seed_byo_kubeconfigs: platform store key byo-<name> (property kubeconfig) for every `provider: byo` fleet file of the
-# installation (charts/cluster templates/byo/access.yaml; docs/providers.md "Bring your own cluster (byo)"). Source, first
-# match: the file named by BYO_KUBECONFIG_<NAME> (name upper-cased, '-' -> '_'), else the local k3d cluster <name>
-# (`k3d kubeconfig get`, API server rewritten to its server node's IP on docker network kind: what mgmt pods reach, as
-# with CAPD's kubeconfigs). Neither: a warning, and the cluster stays unregistered until seeded. Re-run after rotating.
+# seed_byo_kubeconfigs: key byo-<name> for every `provider: byo` fleet file, from the file in BYO_KUBECONFIG_<NAME> or
+# else the local k3d cluster <name> (API rewritten to its IP on network kind). docs/providers.md "Bring your own cluster".
 seed_byo_kubeconfigs() {
   local cf name var file kc ip
   for cf in "installations/$INST/clusters/"*.yaml; do
@@ -399,6 +402,8 @@ seed_byo_kubeconfigs() {
   done
 }
 
+# --- subcommands --------------------------------------------------------------------------------------------------
+
 cmd_secrets() {
   load_inst
   if [[ "$BACKEND" != "kubernetes" ]]; then
@@ -414,9 +419,7 @@ cmd_secrets() {
   # platform-github: Argo CD repo-creds for installation.githubOrg (read-only).
   case "$GH_MODE" in
     app)
-      apply_secret platform-secrets platform-github githubAppID=GITHUB_APP_ID \
-        githubAppInstallationID=GITHUB_APP_INSTALLATION_ID githubAppPrivateKey=@"$GITHUB_APP_PRIVATE_KEY_FILE"
-      log "  platform-github: GitHub App $GITHUB_APP_ID, installation $GITHUB_APP_INSTALLATION_ID" ;;
+      apply_github_app_secret platform-github GITHUB_APP ;;
     token)
       apply_secret platform-secrets platform-github username=GH_LOGIN token=GH_SECRET
       log "  platform-github: $GH_SRC (user $GH_LOGIN)" ;;
@@ -462,20 +465,14 @@ cmd_secrets() {
   # platform-github-app: write access (GitOps hand-off commits, scaffolder). Optional.
   if [[ -n "${GITHUB_PUSH_APP_ID:-}${GITHUB_PUSH_APP_INSTALLATION_ID:-}${GITHUB_PUSH_APP_PRIVATE_KEY_FILE:-}" ]]; then
     require_app_env GITHUB_PUSH_APP_ID GITHUB_PUSH_APP_INSTALLATION_ID GITHUB_PUSH_APP_PRIVATE_KEY_FILE
-    apply_secret platform-secrets platform-github-app githubAppID=GITHUB_PUSH_APP_ID \
-      githubAppInstallationID=GITHUB_PUSH_APP_INSTALLATION_ID githubAppPrivateKey=@"$GITHUB_PUSH_APP_PRIVATE_KEY_FILE"
-    log "  platform-github-app: GitHub App $GITHUB_PUSH_APP_ID, installation $GITHUB_PUSH_APP_INSTALLATION_ID"
+    apply_github_app_secret platform-github-app GITHUB_PUSH_APP
   fi
 
-  # promotion-gate-github: the platform's GitHub App (Contents, Pull requests, Commit statuses: write; app repos
-  # only). The promotion gate and every in-cluster build mint installation tokens scoped to one repository per run
-  # (builds: ESO GithubAccessToken generator, docs/build-plane.md). Optional: without it the gate fails closed, builds
-  # fail at checkout, and auto-build + PR previews are not rendered (secrets.githubGateApp.enabled, gate_app_enabled).
+  # promotion-gate-github: the platform's GitHub App; the gate and builds mint per-repository tokens from it.
+  # Optional: without it the gate fails closed and auto-build + PR previews are not rendered (docs/build-plane.md).
   if [[ -n "${GITHUB_GATE_APP_ID:-}${GITHUB_GATE_APP_INSTALLATION_ID:-}${GITHUB_GATE_APP_PRIVATE_KEY_FILE:-}" ]]; then
     require_app_env GITHUB_GATE_APP_ID GITHUB_GATE_APP_INSTALLATION_ID GITHUB_GATE_APP_PRIVATE_KEY_FILE
-    apply_secret platform-secrets promotion-gate-github githubAppID=GITHUB_GATE_APP_ID \
-      githubAppInstallationID=GITHUB_GATE_APP_INSTALLATION_ID githubAppPrivateKey=@"$GITHUB_GATE_APP_PRIVATE_KEY_FILE"
-    log "  promotion-gate-github: GitHub App $GITHUB_GATE_APP_ID, installation $GITHUB_GATE_APP_INSTALLATION_ID"
+    apply_github_app_secret promotion-gate-github GITHUB_GATE_APP
   elif [[ "$(gate_app_enabled)" == true ]]; then
     log "  promotion-gate-github: kept from an earlier run"
   else
@@ -495,11 +492,8 @@ cmd_secrets() {
   fi
 }
 
-# gate_app_enabled -> true|false|"" : root app value secrets.githubGateApp.enabled. Features that need the platform
-# GitHub App (auto-build, PR previews: their ESO GithubAccessToken generators fail without the key and degrade the
-# apps) render only when it is true (#192). kubernetes backend: true iff promotion-gate-github is seeded and
-# installation.yaml does not set it to false. Other backends: "" (bootstrap cannot see the store; installation.yaml
-# decides, default false in charts/platform).
+# gate_app_enabled -> true|false|"": root app value secrets.githubGateApp.enabled. kubernetes backend: true iff
+# promotion-gate-github is seeded and installation.yaml does not say false; other backends: "" (installation.yaml decides).
 gate_app_enabled() {
   [[ "$BACKEND" == kubernetes ]] || return 0
   if [[ "$(yq '.secrets.githubGateApp.enabled' "$INST_FILE")" == false ]]; then
@@ -511,9 +505,8 @@ gate_app_enabled() {
   fi
 }
 
-# registry_cache_enabled -> true|false: host pull-through caches (hack/registry-cache.sh). installation.yaml
-# registry.hostCache.enabled (local: true) unless REGISTRY_CACHE=0. Passed to the root app as a parameter so CAPD nodes
-# (charts/cluster) mirror to the caches only when they run.
+# registry_cache_enabled -> true|false: installation.yaml registry.hostCache.enabled unless REGISTRY_CACHE=0. A root app
+# parameter, so CAPD nodes mirror to the host caches (hack/registry-cache.sh) only while they run.
 registry_cache_enabled() {
   if [[ "${REGISTRY_CACHE:-1}" == 0 ]]; then
     echo false
@@ -536,9 +529,8 @@ apply_root_app() {
   root_app_manifest | kubectl --context "$CTX" apply -f - >/dev/null
 }
 
-# Bootstrap repo credentials so Argo CD can read a private fork before ESO exists (same sources as platform-github;
-# the gh fallback only for the local backend).
-# Once ESO's repo-creds is Ready the bootstrap copy is deleted (it may hold a broad gh token).
+# Repo credentials so Argo CD can read a private fork before ESO exists (gh fallback on the kubernetes backend only).
+# Deleted once ESO's repo-creds is Ready (it may hold a broad gh token).
 seed_argocd_repo_secret() {
   if repo_creds_ready; then
     retire_repo_bootstrap
@@ -651,10 +643,8 @@ cmd_status() {
   admin_password_hint
 }
 
-# cmd_timings: clean-bootstrap phase timings of the running stack, in minutes since the first mgmt node was created
-# (~= `task up` start + 20 s). An app counts once it is Synced+Healthy now, at the end of its first successful sync
-# (history[0]: an op only succeeds after its waves are healthy; later syncs do not move it). Workload apps are
-# <addon>-<cluster> with a non-local destination. Read-only.
+# cmd_timings (read-only): minutes from the first mgmt node to each app's first successful sync (history[0]), for
+# apps that are Synced+Healthy now. Workload apps are <addon>-<cluster> with a non-local destination.
 cmd_timings() {
   load_inst
   require_bins kubectl yq
@@ -707,10 +697,8 @@ cmd_ui() {
   kubectl --context "$CTX" port-forward -n argocd svc/argocd-server 8081:80
 }
 
-# freeze_argocd: stop the Argo CD controllers that write to clusters. The fleet Clusters are Argo CD-managed with
-# selfHeal, so a Cluster deleted under a running application-controller is re-created within seconds (a new CAPD
-# cluster boots while mgmt is being torn down), and the ApplicationSet controller rewrites Applications as cluster
-# secrets go away. Scaling to 0 is undone by the next `task up`/`task argocd` (helm upgrade restores the replicas).
+# freeze_argocd: scale the Argo CD controllers to 0, or selfHeal re-creates each deleted fleet Cluster within seconds.
+# The next `task up`/`task argocd` (helm upgrade) restores the replicas.
 freeze_argocd() {
   kubectl --context "$CTX" get ns argocd >/dev/null 2>&1 || return 0
   log "Freezing Argo CD (application + applicationset controllers to 0 replicas) so it cannot re-create Clusters"
@@ -721,8 +709,8 @@ freeze_argocd() {
     || warn "Argo CD controller pods still terminating; continuing"
 }
 
-# remove_capd_leftovers: CAPD node containers carry the kind label io.x-k8s.kind.cluster=<cluster>. Remove the ones of
-# the given clusters that CAPI could not delete in time (only those names: other kind clusters on the host are kept).
+# remove_capd_leftovers <cluster>...: remove the CAPD node containers (label io.x-k8s.kind.cluster) CAPI left behind;
+# other kind clusters on the host are kept.
 remove_capd_leftovers() {
   local c ids seen=" "
   for c in "$@"; do
@@ -754,8 +742,7 @@ cmd_down() {
     kubectl --context "$CTX" delete clusters.cluster.x-k8s.io -n fleet --all --wait=true \
       --timeout="${DOWN_TIMEOUT:-5m}" || warn "CAPI cluster deletion did not finish within ${DOWN_TIMEOUT:-5m}"
   fi
-  # Leftovers of the clusters mgmt listed plus the installation's fleet files (mgmt may already be unreachable),
-  # disabled ones included (a profile switch, docs/dev-environment.md "Local profiles", may have left containers).
+  # Plus every fleet file, disabled ones included: mgmt may be unreachable, and a profile switch may have left containers.
   local f
   for f in "installations/$INST/clusters/"*.yaml "installations/$INST/clusters/"*.yaml.disabled; do
     [[ -f "$f" ]] && clusters+=("$(yq '.name' "$f")")
@@ -765,6 +752,7 @@ cmd_down() {
   k3d cluster delete platform-mgmt 2>/dev/null || true
 }
 
+# --- dispatch (hack/tests/lib.sh bootstrap_harness cuts the file here) ---------------------------------------------
 case "$CMD" in
   up)      cmd_up ;;
   secrets) cmd_secrets ;;

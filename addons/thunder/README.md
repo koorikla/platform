@@ -104,6 +104,30 @@ Wrapper chart for ThunderID (`1.0.1`). Runs OpenChoreo's OIDC identity provider 
 | thunderid.setup.secretEnv[7].secretKey | string | `"finops-agent-client-secret"` |  |
 | thunderid.setup.secretEnv[7].secretName | string | `"thunder-bootstrap"` |  |
 
+### Design notes
+
+- **Upstream:** OpenChoreo 1.3.3 `install/k3d/common/values-thunder.yaml` nested under `thunderid:`; every deviation is marked `platform:` in `values.yaml`.
+- **Issuer:** browsers and pods use the same URL `http://thunder.openchoreo.localhost:8080` (browsers via the k3d published port, mgmt pods via the coredns-local rewrite to the control-plane Gateway). The HTTPRoute attaches once Gateway `openchoreo-control-plane/gateway-default` exists.
+- **Secrets** (no literal credentials in git): `ClusterSecretStore/platform`, key `openchoreo` -> Secret `thunder-bootstrap` (`templates/bootstrap-secret.yaml`). Properties are alphanumeric because Thunder's bootstrap splices them into YAML:
+
+  | Property | Used by |
+  |---|---|
+  | `thunder-admin-password` | Thunder console admin (user `admin`) |
+  | `admin-user-password` | `admin@openchoreo.dev` (group admins -> OpenChoreo role admin) |
+  | `developer-user-password` | `developer@openchoreo.dev` (developers: org-wide read-only; demo-developers: role developer in project demo) |
+  | `backstage-client-secret` | OAuth client `openchoreo-backstage-client` (also addon openchoreo-control-plane) |
+  | `backstage-backend-secret` | addon openchoreo-control-plane only |
+  | `service-mcp-client-secret` | OAuth client `service_mcp_client` (headless MCP, [AI agents](../../docs/ai-agents.md)) |
+
+  Plus `openchoreo-observability` / `observer-client-secret` (observer client) and `promotion-gate` / `client-secret` ([promotion](../../docs/promotion.md)). The setup Job resolves `{{ .VAR }}` placeholders from its environment; `setup.secretEnv` puts the values there.
+- **Hooks:** Argo CD runs every Helm hook as PreSync on every sync, in this order:
+  1. VAP `thunder-pvc-delete-protection` (weight -30): denies deleting the PVCs, so a failed sync cannot make Argo CD delete them.
+  2. ExternalSecret `thunder-bootstrap` (-20).
+  3. PVCs database/certs/secrets (-15, upstream hooks) with `hook-delete-policy: hook-failed`, so a successful sync never wipes the SQLite DB and keys. They stay Pending until the setup Job mounts them: Argo CD needs a PVC health override ([OpenChoreo](../../docs/openchoreo.md)).
+  4. ServiceAccount/ConfigMaps (-10), then the setup Job (-5): a throw-away Thunder on localhost:8090 imports the bundle (upserts by id; every document must be a mapping, `hack/tests/test_thunder_bootstrap.sh`). The setup pod carries the Deployment's selector labels, so `thunder-service` routes to it for ~1 min per sync.
+- Argo CD never diffs hooks (#221): ConfigMap `thunder-setup-inputs` carries their checksums so a hook-only change still syncs.
+- **Footprint:** one pod 100m/50Mi requests, the setup Job the same while it runs, 3 small local-path PVCs.
+
 ## Day-2 notes
 
 - Values are checked by `values.schema.json` (bootstrap Secret keys, AI agent names, host format; `helm` prints the failing path). Host consistency with `openchoreo.controlPlane.host` is checked in `templates/validate.yaml`.

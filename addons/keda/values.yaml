@@ -1,21 +1,5 @@
-# KEDA on workload clusters: opt-in (catalog default false; enable per cluster with label
-# addons.platform.koorikla.io/keda: "true", i.e. cluster file `addons: { keda: true }`). docs/data-services.md "KEDA".
-#
-#   keda-operator                 reconciles ScaledObject / ScaledJob / TriggerAuthentication; owns one HPA per
-#                                 ScaledObject (keda-hpa-<name>) and scales 0 <-> 1 itself
-#   keda-operator-metrics-apiserver  serves external.metrics.k8s.io (APIService v1beta1.external.metrics.k8s.io: one
-#                                 per cluster - nothing else may register it)
-#   keda-admission-webhooks       rejects a ScaledObject whose target already has an HPA (e.g. the OpenChoreo
-#                                 `horizontal-pod-autoscaler` trait) and duplicate ScaledObjects
-#
-# Watches all namespaces (OpenChoreo cell namespaces dp-* are created at runtime). RBAC: ClusterRole keda-operator
-# reads every workload's /scale subresource (rbac.scaledRefKinds: all kinds) and Secrets cluster-wide only through
-# TriggerAuthentication references; keda-operator-metrics-apiserver gets system:auth-delegator. Certificates: cert-manager
-# (default addon on workload clusters) instead of the operator generating and patching them itself, so no controller
-# rewrites the webhook/APIService caBundle behind Argo CD (cert-manager's cainjector does, ignored by ServerSideDiff).
-# Metrics: ServiceMonitors for all three components, scraped by the Prometheus agent of addon telemetry (it selects
-# every ServiceMonitor/PodMonitor, all namespaces) -> remote write to the observability plane. Needs addon telemetry
-# (its prometheus-operator CRDs) on the same cluster.
+# KEDA on workload clusters, opt-in per cluster (`addons: { keda: true }`); docs/data-services.md "KEDA".
+# Components, RBAC, certificates and metrics: README.md "Design notes".
 
 namespace:
   # -- `restricted` Pod Security admission label on namespace `keda`.

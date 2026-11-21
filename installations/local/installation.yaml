@@ -24,19 +24,17 @@ secrets:
   # whether promotion-gate-github (GITHUB_GATE_APP_*) is seeded; `false` here keeps them off (docs/forking.md, #192).
   workloadSeed:                               # local backend: copied from mgmt `platform` into each workload cluster
     keys: [openchoreo-observability]          # falco-webhook stays on mgmt (per-cluster tokens: charts/cluster falcoEscalation)
-  # No k3s registries.yaml / platform-ghcr: every image this installation pulls from ghcr.io is public (koorikla/
-  # hello-world, koorikla/platform/ci-toolbox: anonymous pull checked 2026-11). Private images: true + GHCR_* (docs/forking.md).
+  # Every ghcr.io image this installation pulls is public: no registries.yaml / platform-ghcr.
+  # Private images: true + GHCR_* (docs/forking.md).
   nodeRegistryAuth:
     enabled: false
-  # Per-tenant SecretStores backed by OpenBao on mgmt (docs/multicluster.md "Tenant secrets (OpenBao)"): every
-  # OpenChoreo cell namespace reads only kv-tenant-<project>; ClusterSecretStore default refuses tenant namespaces.
-  # Needs mgmt.addons.openbao and mesh members (OpenBao verifies the namespaces' ServiceAccount tokens per cluster).
+  # Per-tenant SecretStores backed by OpenBao on mgmt: each cell namespace reads only kv-tenant-<project>.
+  # Needs mgmt.addons.openbao and mesh members (docs/multicluster.md "Tenant secrets (OpenBao)").
   tenantStores:
     enabled: true
 
-# Image registry (docs/build-plane.md). harbor: addon harbor on mgmt is where in-cluster builds push (project
-# appsProject) and what nodes pull through (proxy caches + upstream fallback). external: builds push to
-# external.repository with credentials from the platform store; nodes pull upstream (secrets.nodeRegistryAuth).
+# Image registry (docs/build-plane.md). harbor: builds push to Harbor on mgmt and nodes pull through its proxy caches;
+# external: builds push to external.repository, nodes pull upstream.
 registry:
   type: harbor                                # harbor | external
   host: harbor.openchoreo.localhost:9443      # image refs, Harbor externalURL + Gateway listener; k3d publishes 9443
@@ -52,10 +50,8 @@ registry:
     enabled: true                             # k3s registries.yaml mirrors (new machines only: bootstrap data)
   # Local only: CAPD nodes resolve the registry name to this container on docker network kind (k3d serverlb).
   nodeHostAlias: k3d-platform-mgmt-serverlb
-  # Host pull-through caches (hack/registry-cache.sh, docs/dev-environment.md "Registry caches"): one registry
-  # container per upstream on network kind that survives `task down`, so a rebuild pulls from disk. k3d mgmt nodes and
-  # CAPD nodes mirror these upstreams to them (instead of Harbor); others still go through Harbor. REGISTRY_CACHE=0
-  # on `task up` opts out (bootstrap sets the root parameter registry.hostCache.enabled=false).
+  # Host pull-through caches that survive `task down`, so a rebuild pulls from disk; REGISTRY_CACHE=0 on `task up`
+  # opts out (hack/registry-cache.sh, docs/dev-environment.md "Registry caches").
   hostCache:
     enabled: true
     mirrors:
@@ -80,14 +76,11 @@ capi:
     hetzner: false
 
 openchoreo:
-  orgNamespace: default
   controlPlane:
     host: openchoreo.localhost                 # console; api.<host>, thunder.<host> derive from it
-    # URL workload-cluster agents dial. Locally resolved to mgmt by the coredns-local addon.
-    clusterGatewayURL: wss://cluster-gateway.openchoreo.localhost:8443/ws
+    # clusterGatewayURL (agents dial it): chart default wss://cluster-gateway.openchoreo.localhost:8443/ws, resolved by coredns-local
   # Observability plane on mgmt (addon openchoreo-observability-plane) + data-plane telemetry (addon telemetry).
-  # Endpoints: observer.<host>:<httpPort>, {opentelemetry,prometheus}.observability.<host>:<httpPort> (HTTP),
-  # opensearch.observability.<host>:<tlsPort> (TLS passthrough). docs/observability.md.
+  # Endpoints per port: docs/observability.md.
   observability:
     enabled: true                              # false: no observabilityPlaneRef; disable the two addons too
     httpPort: 11080                            # k3d publishes 11080/11085 on the mgmt load balancer
@@ -117,12 +110,8 @@ promotion:
       timeZone: Europe/Tallinn
       environments: [production]
 
-# PR preview environments (docs/preview-environments.md): every open pull request of a component whose Component carries
-# the preview opt-in annotation (that doc, "Opting in") gets its own OpenChoreo Environment pr-<n>-<component> on
-# `dataPlane`, running the in-cluster build of the PR head; the URL is posted to the PR as commit status
-# openchoreo/preview. Removed when the PR closes, or after `ttl`: the auto-build pass labels the PR `expiredLabel` (the
-# preview renders empty, Argo CD prunes it) and Kyverno deletes whatever is left. Read by charts/tenant (ApplicationSet),
-# addon secret-stores (GitHub token), kyverno-policies (TTL, cap, quotas, isolation), openchoreo-platform (build).
+# PR preview environments: each open PR of an opted-in Component gets Environment pr-<n>-<component> on `dataPlane`,
+# removed when the PR closes or after `ttl` (docs/preview-environments.md).
 previews:
   enabled: true
   dataPlane: dev1                              # ClusterDataPlane of the development tier
@@ -131,12 +120,8 @@ previews:
   requeueAfterSeconds: 120                     # pull request poll (no GitHub webhook locally)
   expiredLabel: preview-expired                # remove it from the PR for a fresh preview
 
-# Istio mesh (docs/multicluster.md). groups: one root + intermediate CA per group, generated inside OpenBao on mgmt
-# (addon openbao); a fleet file's mesh.group must be listed. A group is a cryptographic boundary: clusters of different
-# environments / trust levels never share one - `local` is the exception on purpose (one laptop: dev1 alone in the lean
-# profile, dev1 + prod1 in the multicluster profile, docs/dev-environment.md "Local profiles").
-# ca: where members reach OpenBao (kgateway TLS passthrough on mgmt). port == k3d published port
-# (bootstrap/k3d-mgmt.yaml); the host resolves to the k3d serverlb on CAPD members (coredns-local).
+# Istio mesh (docs/multicluster.md): one CA per group, a trust boundary; `local` holds dev1 and prod1 on purpose (one laptop).
+# ca: where members reach OpenBao on mgmt; port == the k3d published port (bootstrap/k3d-mgmt.yaml).
 mesh:
   groups: [local]
   ca:

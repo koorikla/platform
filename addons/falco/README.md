@@ -125,6 +125,13 @@ Wrapper chart for Falco (`9.2.2` / `0.45.2`, modern eBPF), `falcosidekick` (`2.3
 | slack.minimumPriority | string | `"warning"` |  |
 | slack.remoteKey | string | `"falco-slack"` |  |
 
+### Design notes
+
+- **Falco 0.45** (chart 9.2.2), driver `modern_ebpf` (CO-RE: no kernel module, no driver loader), default rules + platform rules. JSON alerts go to stdout (Fluent Bit -> OpenSearch on mgmt) and over HTTP to falcosidekick.
+- **falcosidekick outputs:** `talon` -> Falco Talon (actions on app namespaces `dp-*`); `cloudevents` -> telemetry collector logs pipeline; `otlp.metrics` -> collector metrics pipeline (alert counters -> Prometheus on mgmt); `webhook` -> escalation endpoint on mgmt (addon argo-events, `POST /falco/<cluster>` with the cluster's own token, >= critical); `slack` off until `slack.enabled`.
+- **Falco Talon 0.3** (chart 0.5.0, workload clusters only): crypto miner -> label + terminate; shell in an app container -> label only.
+- **Local caveat:** k3d/CAPD node containers share the host kernel, so every cluster's Falco sees every container on the machine (others without k8s metadata). On real nodes each Falco sees its own node.
+
 ## Day-2 notes
 
 - Responding to critical Falco alerts and rotating webhook tokens: [incidents](../../docs/runbooks/incidents.md#falco-critical-alert) and [certificates and secrets](../../docs/runbooks/certificates-and-secrets.md#6-eso-backed-platform-and-workload-secrets).

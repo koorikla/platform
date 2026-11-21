@@ -1,22 +1,5 @@
-# Strimzi cluster operator on workload clusters: opt-in (catalog default false; enable per cluster with label
-# addons.platform.koorikla.io/strimzi: "true", i.e. cluster file `addons: { strimzi: true }`). docs/data-services.md
-# "Kafka (Strimzi)".
-#
-# Strimzi 1.x: KRaft only (no ZooKeeper), Kafka / KafkaNodePool / KafkaTopic / KafkaUser in kafka.strimzi.io/v1.
-# CRDs come from the chart's crds/ directory; Argo CD renders and applies them server-side (every addon Application
-# syncs with ServerSideApply=true - the Kafka CRD is far larger than the client-side last-applied annotation allows).
-#
-# Watch scope: all namespaces (watchAnyNamespace: OpenChoreo cell namespaces dp-* are created at runtime, so they cannot
-# be listed). RBAC this implies: ClusterRoleBindings for strimzi-cluster-operator-namespaced / -watched / -global and
-# the entity-operator delegation, i.e. the operator can manage Pods, Services, Secrets, ConfigMaps, PVCs,
-# NetworkPolicies, PDBs and Roles/RoleBindings in every namespace (it creates the brokers' and entity operators'
-# objects next to each Kafka CR). Restrict with watchNamespaces + watchAnyNamespace: false in an installation overlay
-# if Kafka clusters live only in known namespaces.
-#
-# Images: multi-arch (amd64, arm64), pinned by digest. The operator also launches operands: topic/user operator and
-# kafka-init (= the operator image, pinned here), Kafka Bridge, Buildah / Maven builder (KafkaConnect builds, pinned
-# here) and the Kafka broker image chosen per Kafka CR spec.kafka.version (STRIMZI_KAFKA_IMAGES, tags only - pin a broker
-# image by digest with spec.kafka.image, example in docs/data-services.md).
+# Strimzi cluster operator on workload clusters, opt-in per cluster (`addons: { strimzi: true }`); docs/data-services.md
+# "Kafka (Strimzi)". KRaft, watch scope, RBAC and images: README.md "Design notes".
 
 namespace:
   # -- `restricted` Pod Security admission label on namespace `strimzi`.

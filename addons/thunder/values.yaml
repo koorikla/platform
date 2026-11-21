@@ -1,41 +1,5 @@
-# ThunderID on mgmt = OpenChoreo 1.3.3 install/k3d/common/values-thunder.yaml nested under `thunderid:`, with the
-# deviations marked "platform:". Browsers and pods use the same issuer URL http://thunder.openchoreo.localhost:8080:
-# browsers via the k3d published port 8080, mgmt pods via the coredns-local rewrite to the control-plane Gateway.
-# The HTTPRoute attaches once Gateway openchoreo-control-plane/gateway-default exists (addon openchoreo-control-plane).
-#
-# Secrets (platform: no literal credentials in git, unlike upstream): ClusterSecretStore `platform`, key `openchoreo`
-# (templates/bootstrap-secret.yaml -> Secret thunder-bootstrap). Properties, all alphanumeric (they are spliced into
-# YAML by Thunder's bootstrap):
-#   thunder-admin-password    Thunder console admin (user `admin`)
-#   admin-user-password       OpenChoreo user admin@openchoreo.dev     (group admins     -> OpenChoreo role admin)
-#   developer-user-password   OpenChoreo user developer@openchoreo.dev (groups developers -> org-wide read-only, and
-#                             demo-developers -> role developer in project demo only; charts/tenant developerGroups)
-#   backstage-client-secret   OAuth client openchoreo-backstage-client (also read by addon openchoreo-control-plane)
-#   backstage-backend-secret  (read by addon openchoreo-control-plane only)
-#   service-mcp-client-secret OAuth client service_mcp_client (headless MCP clients, client_credentials; docs/ai-agents.md)
-# plus, from other keys of the same store: `openchoreo-observability` observer-client-secret (OAuth client
-# openchoreo-observer-resource-reader-client) and `promotion-gate` client-secret (OAuth client openchoreo-promotion-gate,
-# read by the promotion gate's per-run ExternalSecret too; docs/promotion.md).
-# Thunder's bootstrap (`thunderid bootstrap`, run by the setup Job) resolves `{{ .VAR }}` placeholders in the bundle
-# from the Job's environment (backend/cmd/server/bootstrap_cmd.go); setup.secretEnv puts the values there.
-#
-# Argo CD runs every Helm hook of this chart as a PreSync hook, on EVERY sync (Helm: install only):
-#   - VAP thunder-pvc-delete-protection (ours, weight -30, templates/pvc-delete-protection.yaml): denies deleting the
-#     PVCs below, so a failed sync can no longer make Argo CD delete them (it did, with hook-failed, when the setup Job
-#     failed after PR #5).
-#   - PVCs database/certs/secrets (weight -15, hardcoded hooks upstream): hook-delete-policy hook-failed below, so a
-#     successful sync never deletes them (Argo's default BeforeHookCreation would wipe the sqlite DB and the generated
-#     keys each sync), plus the delete-protection annotation. local-path is WaitForFirstConsumer, so they stay Pending
-#     until the setup Job mounts them: Argo CD needs a PVC health override (Pending = Healthy) or the PreSync phase
-#     never finishes (argo-cd addon, see docs/openchoreo.md).
-#   - ExternalSecret thunder-bootstrap (ours, weight -20) before the Job; ServiceAccount/ConfigMaps (-10);
-#     setup Job (-5): starts a throw-away Thunder on localhost:8090 against the same sqlite PVC and imports the bundle
-#     below (upserts by id: re-runs are safe; every document must be a mapping, hack/tests/test_thunder_bootstrap.sh).
-#     Replaced on every sync (setup.preserveJob). RISK: the setup pod carries the Deployment's selector labels (no
-#     knob), so thunder-service routes to it for ~1 min per sync.
-#   Argo CD never diffs hooks (#221): a change to the ExternalSecret or a hook ConfigMap alone would never trigger a
-#   sync. The normal ConfigMap thunder-setup-inputs (templates/setup-inputs.yaml) carries their checksums, so it does.
-# Footprint: one pod 100m/50Mi requests (upstream), setup Job the same while it runs, 3 small PVCs on local-path.
+# ThunderID on mgmt: OpenChoreo 1.3.3 install/k3d/common/values-thunder.yaml under `thunderid:`, deviations marked
+# "platform:". Secrets, hook order and PVC protection: README.md "Design notes".
 
 bootstrapSecret:
   # -- Pulls OIDC client and admin secrets (`bootstrapSecret.{store,remoteKey,observabilityRemoteKey,promotionGate}`) from `ClusterSecretStore/platform` into `thunder-bootstrap`.
@@ -80,9 +44,8 @@ thunderid:
     hostnames:
       - thunder.openchoreo.localhost
 
-  # platform: keep the PVCs across successful syncs (hook-failed, see header) and make them undeletable, also by Argo CD
-  # after a failed sync (delete-protection: templates/pvc-delete-protection.yaml). Never drop hook-failed: without an
-  # explicit policy Argo CD deletes a hook before every sync (BeforeHookCreation). hack/tests/test_pvc_hooks.sh.
+  # platform: never drop hook-failed, or Argo CD deletes the PVCs before every sync (BeforeHookCreation); the
+  # delete-protection VAP covers failed syncs. hack/tests/test_pvc_hooks.sh.
   persistence:
     annotations:
       helm.sh/hook-delete-policy: hook-failed
@@ -126,10 +89,8 @@ thunderid:
 
   setup:
     enabled: true
-    # platform: no helm.sh/hook-delete-policy and no ttl on the Job, so Argo CD applies its default BeforeHookCreation:
-    # each sync replaces the previous run. Upstream's hook-succeeded left a FAILED Job in place for 24h (ttl), and Argo
-    # re-applying an existing failed hook Job re-reports the failure (or hits "field is immutable" once the spec
-    # changed) instead of running setup again. The last run stays for `kubectl logs job/thunder-setup`.
+    # platform: no hook-delete-policy and no ttl, so each sync replaces the previous Job (upstream left a failed Job that
+    # Argo re-reported instead of re-running). The last run stays for `kubectl logs job/thunder-setup`.
     preserveJob: true
     admin:
       passwordRef: { name: thunder-bootstrap, key: thunder-admin-password }   # platform: no lookup()-generated Secret
@@ -144,12 +105,8 @@ thunderid:
       # and only those agents' scripts reference them (templates/ai-agent-clients.yaml).
       - { name: RCA_AGENT_CLIENT_SECRET, secretName: thunder-bootstrap, secretKey: rca-agent-client-secret, optional: true }
       - { name: FINOPS_AGENT_CLIENT_SECRET, secretName: thunder-bootstrap, secretKey: finops-agent-client-secret, optional: true }
-    # Scripts 53 / 60 (AI agent OAuth clients) from ConfigMap thunder-ai-agent-clients (templates/ai-agent-clients.yaml),
-    # derived from bootstrapSecret.aiAgentClients: a listed agent's key is the upstream client, an unlisted agent has
-    # NO key. Thunder's bootstrap reads every *.yaml below /opt/thunderid/bootstrap (recursively) and fails on an empty
-    # or comment-only document, so an unlisted agent must be no file at all, not a placeholder file: the items are
-    # optional (a missing key = no file) and land in directory ai-agent-clients/, mounted by subPath so only the real
-    # files appear (no ConfigMap ..data metadata). README (always present, not *.yaml) keeps the directory.
+    # Scripts 53 / 60 (AI agent OAuth clients, templates/ai-agent-clients.yaml): only agents listed in
+    # bootstrapSecret.aiAgentClients get a file, because Thunder fails on an empty or comment-only document.
     extraVolumes:
       - name: ai-agent-clients
         configMap:
@@ -162,13 +119,8 @@ thunderid:
     extraVolumeMounts:
       - { name: ai-agent-clients, mountPath: /opt/thunderid/bootstrap/ai-agent-clients, subPath: ai-agent-clients, readOnly: true }
 
-  # Declarative documents imported by the setup Job on top of ThunderID's shipped defaults; upserted by fixed id
-  # (01900000-0000-7000-8001-* block, clear of ThunderID's own). Upstream 48, 49, 51, 54 verbatim except the client
-  # secret; 50 reduced to two users with generated passwords. platform: dropped upstream 52/55/56/58/61/62 - service
-  # clients with well-known secrets for components not installed here (sample portal, browser MCP, workload publisher,
-  # e2e); 57/59 below with their secrets from the store; 53/60 (AI agents) from setup.extraVolumes above. Add a client
-  # back together with the feature that uses it. Platform clients (70+) use ids from
-  # 01900000-0000-7000-8001-000000000100 on, clear of upstream's.
+  # Documents the setup Job upserts by fixed id (01900000-0000-7000-8001-*; platform clients 70+ from ...0100). Upstream
+  # 48-51, 54 kept; clients for components not installed here dropped (add one back with its feature); 53/60 above.
   bootstrap:
     scripts:
       # A path override replaces ThunderID's shipped entry: every directive except img-src mirrors the 1.0.1 defaults.

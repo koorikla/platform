@@ -21,8 +21,7 @@ mgmt:
 
 secrets:
   backend: aws                                # ClusterSecretStore/platform -> AWS Secrets Manager
-  githubGateApp:                              # platform GitHub App (store key promotion-gate-github, docs/forking.md)
-    enabled: false                            # true once the key is in the store: auto-build, PR previews
+  # githubGateApp: {enabled: true}             # once store key promotion-gate-github exists: auto-build, PR previews
   aws:
     region: eu-central-1
     # ESO authenticates with its pod identity (IRSA / EKS Pod Identity); no static keys. VERIFY shape vs secret-stores
@@ -45,7 +44,6 @@ capi:
     hetzner: false
 
 openchoreo:
-  orgNamespace: default
   controlPlane:
     host: openchoreo.aws.example.com
     clusterGatewayURL: wss://cluster-gateway.openchoreo.aws.example.com/ws   # VERIFY port/path with OC 1.3.3
