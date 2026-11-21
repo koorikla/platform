@@ -1,45 +1,51 @@
-{{- /* Upstream OpenChoreo 1.3.3 ClusterComponentTypes, ClusterTraits and ClusterProjectType from files/ (cluster-scoped,
-mgmt). Verbatim (files/README.md) except the ClusterComponentType edits below, so an upstream bump stays a file copy. */ -}}
+{{- /* Upstream OpenChoreo 1.3.3 ClusterComponentTypes, ClusterTraits and ClusterProjectType from files/, copied
+verbatim (files/README.md) so an upstream bump stays a file copy; the platform edits below apply at render time. */ -}}
 {{- if .Values.upstreamDefaults.enabled }}
 {{- range $path, $_ := .Files.Glob "files/*/*.yaml" }}
 ---
 # Source: {{ $.Chart.Name }}/{{ $path }}
 {{- $obj := $.Files.Get $path | fromYaml }}
-{{- $_ := set $obj.metadata "annotations" (merge (default dict $obj.metadata.annotations) (dict "argocd.argoproj.io/sync-options" "SkipDryRunOnMissingResource=true")) }}
+{{- include "platform.skipDryRun" $obj }}
 {{- if eq $obj.kind "ClusterComponentType" }}
 {{- $deployment := eq (toString $obj.spec.workloadType) "deployment" }}
-{{- /* Components may build with the platform's per-stack ClusterWorkflows (templates/build-workflows.yaml). */ -}}
+{{- /* Build with the platform's per-stack ClusterWorkflows (templates/build-workflows.yaml). */ -}}
 {{- if $.Values.buildWorkflows.enabled }}
-{{- $wf := list }}
-{{- range $.Values.buildWorkflows.stacks }}{{ $wf = append $wf (dict "kind" "ClusterWorkflow" "name" .name) }}{{ end }}
-{{- $_ := set $obj.spec "allowedWorkflows" $wf }}
+{{- $workflows := list }}
+{{- range $.Values.buildWorkflows.stacks }}{{ $workflows = append $workflows (dict "kind" "ClusterWorkflow" "name" .name) }}{{ end }}
+{{- $_ := set $obj.spec "allowedWorkflows" $workflows }}
 {{- end }}
-{{- /* Platform trait keda-scaler (templates/platform-types.yaml, #70) on the Deployment-based component types. */ -}}
+{{- /* Platform trait keda-scaler (files/platform/cluster-traits/keda-scaler.yaml). */ -}}
 {{- if and $.Values.dataServices.enabled $deployment }}
 {{- $_ := set $obj.spec "allowedTraits" (append (default list $obj.spec.allowedTraits) (dict "kind" "ClusterTrait" "name" "keda-scaler")) }}
 {{- end }}
-{{- /* Opt-in app metrics scraping (#252, files/platform/cluster-traits/metrics.yaml): developers attach ClusterTrait
-metrics with their metrics port to any Deployment component type. */ -}}
+{{- /* Opt-in app metrics scraping (files/platform/cluster-traits/metrics.yaml). */ -}}
 {{- if and $.Values.appMetrics.enabled $deployment }}
 {{- $_ := set $obj.spec "allowedTraits" (append (default list $obj.spec.allowedTraits) (dict "kind" "ClusterTrait" "name" "metrics")) }}
 {{- end }}
-{{- /* Resilience defaults (#251, files/platform/cluster-traits/resilience.yaml): every Deployment component type embeds
-ClusterTrait resilience, so developers get spread, PDB, graceful shutdown and priority without attaching anything.
-Its knobs are component type environmentConfigs (`resilience.*` in a ReleaseBinding's componentTypeEnvironmentConfigs);
-the trait reads the component type's replicas to decide on a PodDisruptionBudget. */ -}}
+{{- /* Resilience defaults, embedded so developers attach nothing: knobs are environmentConfigs `resilience.*` of the
+component type (docs/openchoreo.md "Resilience defaults"). */ -}}
 {{- if and $.Values.resilience.enabled $deployment }}
-{{- $knobs := dict "zoneSpread" (dict "type" "string" "enum" (list "ScheduleAnyway" "DoNotSchedule") "default" "ScheduleAnyway")
-      "nodePool" (dict "type" "string" "default" "")
-      "terminationGracePeriodSeconds" (dict "type" "integer" "default" 30 "minimum" 1)
-      "preStopSleepSeconds" (dict "type" "integer" "default" 5 "minimum" 0) }}
+{{- $knobs := `
+zoneSpread: { type: string, enum: [ScheduleAnyway, DoNotSchedule], default: ScheduleAnyway }
+nodePool: { type: string, default: "" }
+terminationGracePeriodSeconds: { type: integer, default: 30, minimum: 1 }
+preStopSleepSeconds: { type: integer, default: 5, minimum: 0 }
+` | fromYaml }}
 {{- $_ := set $obj.spec.environmentConfigs.openAPIV3Schema.properties "resilience" (dict "type" "object" "default" dict "properties" $knobs) }}
-{{- $bind := dict "replicas" "${environmentConfigs.replicas}" }}
-{{- range $k, $v := $knobs }}{{ $_ := set $bind $k (printf "${environmentConfigs.resilience.%s}" $k) }}{{ end }}
-{{- $_ := set $obj.spec "traits" (append (default list $obj.spec.traits) (dict "kind" "ClusterTrait" "name" "resilience" "instanceName" "resilience" "environmentConfigs" $bind)) }}
+{{- $trait := `
+kind: ClusterTrait
+name: resilience
+instanceName: resilience
+environmentConfigs:
+  replicas: ${environmentConfigs.replicas}
+  zoneSpread: ${environmentConfigs.resilience.zoneSpread}
+  nodePool: ${environmentConfigs.resilience.nodePool}
+  terminationGracePeriodSeconds: ${environmentConfigs.resilience.terminationGracePeriodSeconds}
+  preStopSleepSeconds: ${environmentConfigs.resilience.preStopSleepSeconds}
+` | fromYaml }}
+{{- $_ := set $obj.spec "traits" (append (default list $obj.spec.traits) $trait) }}
 {{- end }}
-{{- /* Secret rotation (#268): every Deployment component type opts in to Stakater Reloader (addon reloader), which rolls
-the Deployment when a Secret it references changes - the ExternalSecret-synced env/file Secrets after an OpenBao
-rotation (refreshInterval 15s) or a resource's credentials. Secrets the pods don't reference never roll them. */ -}}
+{{- /* Secret rotation: Stakater Reloader (addon reloader) rolls the Deployment when a Secret it references changes. */ -}}
 {{- if $deployment }}
 {{- range $r := $obj.spec.resources }}
 {{- if eq (toString $r.id) "deployment" }}
@@ -47,9 +53,8 @@ rotation (refreshInterval 15s) or a resource's credentials. Secrets the pods don
 {{- end }}
 {{- end }}
 {{- end }}
-{{- /* Per-tenant secret stores (installation.yaml secrets.tenantStores.enabled, #96): the ExternalSecrets component
-types render for SecretReferences use the cell namespace's own SecretStore instead of the data plane's
-ClusterSecretStore (which then refuses tenant namespaces; addon secret-stores). Developers never name a store. */ -}}
+{{- /* Per-tenant secret stores (secrets.tenantStores.enabled): SecretReference ExternalSecrets use the cell namespace's
+own SecretStore instead of the data plane's ClusterSecretStore (addon secret-stores). */ -}}
 {{- if $.Values.secrets.tenantStores.enabled }}
 {{- range $r := $obj.spec.resources }}
 {{- if and $r.template (eq (toString $r.template.kind) "ExternalSecret") }}

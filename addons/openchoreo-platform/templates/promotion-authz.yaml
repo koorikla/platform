@@ -1,14 +1,5 @@
-{{- /*
-Promotion authorization (cluster-scoped OpenChoreo authz, mgmt; docs/promotion.md "Manual approval"). OpenChoreo 1.3.3
-has no approval field on DeploymentPipeline; ABAC conditions on resource.environment are the native control over WHO may
-change a binding in an environment through console, openchoreo-api, occ and MCP:
-  ClusterAuthzRoleBinding promotion-deny-<group>  deny binding writes in gated environments per restricted group (an
-                                                  explicit deny wins over the upstream `developer` role's allow)
-  ClusterAuthzRole promotion-component-deleter    charts/tenant denies it per gated Component: deleting a Component
-                                                  cascades to its gated bindings
-Argo CD applies merged PRs through the Kubernetes API (not subject to OpenChoreo authz) and self-heal reverts edits.
-Also: the promotion gate's own client identity (read-only + observer queries).
-*/ -}}
+{{- /* OpenChoreo authz for promotions (docs/promotion.md "Manual approval"): restricted groups may not write bindings in
+gated environments through console/API/occ/MCP; plus the promotion gate's read-only client identity. */ -}}
 {{- $ns := .Values.openchoreo.orgNamespace }}
 {{- $gated := .Values.promotion.gatedEnvironments | default list }}
 {{- if $gated }}

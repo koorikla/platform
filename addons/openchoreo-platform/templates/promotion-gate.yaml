@@ -1,12 +1,5 @@
-{{- /*
-ClusterWorkflow promotion-gate (cluster-scoped, mgmt; docs/promotion.md "Automated gate"): a WorkflowRun without a
-component runs files/promotion-gate/gate.py as one Argo step in workflows-<org ns>. It never writes to a cluster: on
-success it opens/updates the promotion pull request in the app repo.
-Why it is locked down: no ServiceAccount token in the step (only Argo's executor), default-deny egress plus podLabels for
-the OpenChoreo API / Thunder / observer / Prometheus (addon openchoreo-workflow-plane), credentials fetched once per run
-and mounted only into the one gate pod (deleted on completion), a GitHub token minted for the single repository of the
-component's Workload and revoked at the end. Parameters are DNS-1123 constrained; the repository is not a parameter.
-*/ -}}
+{{- /* ClusterWorkflow promotion-gate (docs/promotion.md "Automated gate"): runs files/promotion-gate/gate.py, which verifies
+a release and opens the promotion PR. Locked down: no SA token, default-deny egress, per-run single-repo GitHub token. */ -}}
 {{- $g := .Values.promotionGate }}
 {{- if $g.enabled }}
 {{- $script := .Files.Get "files/promotion-gate/gate.py" }}

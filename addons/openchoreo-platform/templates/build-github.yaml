@@ -1,33 +1,9 @@
-{{- /*
-GitHub App credentials of in-cluster builds in the run namespace workflows-<org ns> (mgmt workflow plane, docs/build-plane.md
-"Git credentials"): ExternalSecret <appSecret> (read only by ESO, no pod mounts it) and RBAC that lets OpenChoreo's
-workflow-plane agent apply each run's `<run>-git` GithubAccessToken generator (templates/_build.tpl build.resources).
-*/ -}}
+{{- /* Build GitHub App credentials in workflows-<org ns> (docs/build-plane.md "Git credentials"): the App secret, read only
+by ESO, and a Role letting OpenChoreo's workflow-plane agent apply each run's GithubAccessToken generator. */ -}}
 {{- if and .Values.openchoreo.workflowPlane.enabled .Values.buildWorkflows.enabled }}
 {{- $g := .Values.buildWorkflows.github }}
 {{- $ns := printf "workflows-%s" .Values.openchoreo.orgNamespace }}
-{{- $key := $g.key }}
-apiVersion: external-secrets.io/v1
-kind: ExternalSecret
-metadata:
-  name: {{ $g.appSecret }}
-  namespace: {{ $ns }}
-spec:
-  refreshInterval: 1h
-  secretStoreRef:
-    kind: ClusterSecretStore
-    name: {{ $g.secretStore }}
-  target:
-    name: {{ $g.appSecret }}
-    creationPolicy: Owner
-    deletionPolicy: Delete
-  data:
-    - secretKey: app-id
-      remoteRef: { key: {{ $key }}, property: githubAppID }
-    - secretKey: installation-id
-      remoteRef: { key: {{ $key }}, property: githubAppInstallationID }
-    - secretKey: private-key
-      remoteRef: { key: {{ $key }}, property: githubAppPrivateKey }
+{{ include "platform.githubAppSecret" (dict "name" $g.appSecret "namespace" $ns "store" $g.secretStore "key" $g.key) }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role

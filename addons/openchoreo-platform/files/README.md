@@ -29,21 +29,22 @@ its `ProjectReleaseBinding`s (projects come from tenants), `Environment`s (chart
 
 ## Platform types (`platform/`)
 
-Not upstream: `platform/cluster-traits/keda-scaler.yaml` and `platform/cluster-resource-types/postgresql.yaml`, the
-OpenChoreo types of the data-service addons (#70, docs/data-services.md "Consuming them from OpenChoreo"), rendered by
-`templates/platform-types.yaml` (`dataServices.enabled`). `templates/upstream-defaults.yaml` adds `keda-scaler` to the
-`allowedTraits` of the Deployment-based component types. Their annotation `platform.koorikla.io/requires-addons` names
-the addons a data plane must announce (ClusterDataPlane annotations from the fleet file); checked by
-hack/tests/test_openchoreo_types.sh.
+Not upstream; rendered by `templates/platform-types.yaml`, each behind a values switch:
 
-Not upstream either: `platform/cluster-traits/resilience.yaml` (#251, docs/openchoreo.md "Resilience defaults"),
-rendered by `templates/platform-types.yaml` (`resilience.enabled`). `templates/upstream-defaults.yaml` embeds it in
-the Deployment-based component types (`spec.traits`, instance `resilience`) and adds the `resilience` object to their
-`environmentConfigs`, so developers never attach it. It also annotates their `deployment` resource
-`secret.reloader.stakater.com/auto: "true"` (#268): addon reloader rolls the pods when a Secret they reference rotates
-(docs/runbooks/certificates-and-secrets.md section 7).
+| File | Switch | What it is |
+|---|---|---|
+| `cluster-traits/keda-scaler.yaml` | `dataServices.enabled` | KEDA ScaledObject trait ([data services](../../../docs/data-services.md)) |
+| `cluster-resource-types/{postgresql,mysql}.yaml` | `dataServices.enabled` | the Crossplane platform APIs as OpenChoreo Resources |
+| `cluster-traits/resilience.yaml` | `resilience.enabled` | spread, PDB, graceful shutdown, priority ([docs/openchoreo.md "Resilience defaults"](../../../docs/openchoreo.md#resilience-defaults)) |
+| `cluster-traits/metrics.yaml` | `appMetrics.enabled` | opt-in PodMonitor ([docs/openchoreo.md "Application metrics"](../../../docs/openchoreo.md#application-metrics)) |
 
-Not upstream either: `platform/cluster-traits/metrics.yaml` (#252, docs/openchoreo.md "Application metrics"), rendered
-by `templates/platform-types.yaml` (`appMetrics.enabled`). Opt-in: `templates/upstream-defaults.yaml` adds it to the
-`allowedTraits` of the Deployment-based component types. Its PodMonitor comes from default-on addon telemetry
-(`platform.koorikla.io/uses-addons`): skipped where a data plane opts out, waited for by the agent's capability gate.
+The data-service types carry `platform.koorikla.io/requires-addons`: the addons a data plane must announce
+(ClusterDataPlane annotations from the fleet file; hack/tests/test_openchoreo_types.sh).
+
+`templates/upstream-defaults.yaml` edits the Deployment-based component types at render time:
+
+- `allowedTraits` += `keda-scaler`, `metrics` (when their switch is on);
+- `spec.traits` += `resilience` and `environmentConfigs` += the `resilience` knobs, so developers never attach it;
+- `deployment` resource annotated `secret.reloader.stakater.com/auto: "true"`: addon reloader rolls the pods when a
+  Secret they reference rotates (docs/runbooks/certificates-and-secrets.md section 7);
+- with `secrets.tenantStores.enabled`, ExternalSecrets use the cell's SecretStore `tenantStoreName`.

@@ -1,17 +1,14 @@
-{{- /* Platform-owned OpenChoreo types from files/platform/ (cluster-scoped, mgmt): ClusterTrait resilience (#251,
-embedded by templates/upstream-defaults.yaml), ClusterTrait metrics (#252, opt-in app metrics scraping) and the
-data-service types keda-scaler + postgresql (#70, docs/data-services.md), each behind its values switch below.
-The data-service types need operators on the data plane (platform.koorikla.io/requires-addons): keda-scaler checks
-dataplane.annotations itself, postgresql bindings are checked at admission (addon kyverno-policies). */ -}}
-{{- $switch := dict "resilience.yaml" .Values.resilience.enabled "metrics.yaml" .Values.appMetrics.enabled }}
+{{- /* Platform-owned OpenChoreo types from files/platform/ (docs/data-services.md, docs/openchoreo.md): resilience and
+metrics have their own switch, every other file (data-service types) follows dataServices.enabled. */ -}}
+{{- $switchByFile := dict "resilience.yaml" .Values.resilience.enabled "metrics.yaml" .Values.appMetrics.enabled }}
 {{- range $path, $_ := .Files.Glob "files/platform/*/*.yaml" }}
-{{- $on := $.Values.dataServices.enabled }}
-{{- if hasKey $switch (base $path) }}{{ $on = get $switch (base $path) }}{{ end }}
-{{- if $on }}
+{{- $enabled := $.Values.dataServices.enabled }}
+{{- if hasKey $switchByFile (base $path) }}{{ $enabled = get $switchByFile (base $path) }}{{ end }}
+{{- if $enabled }}
 ---
 # Source: {{ $.Chart.Name }}/{{ $path }}
 {{- $obj := $.Files.Get $path | fromYaml }}
-{{- $_ := set $obj.metadata "annotations" (merge (default dict $obj.metadata.annotations) (dict "argocd.argoproj.io/sync-options" "SkipDryRunOnMissingResource=true")) }}
+{{- include "platform.skipDryRun" $obj }}
 {{ toYaml $obj }}
 {{- end }}
 {{- end }}

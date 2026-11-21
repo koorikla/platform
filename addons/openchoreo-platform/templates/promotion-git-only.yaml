@@ -1,21 +1,5 @@
-{{- /*
-ValidatingAdmissionPolicy + binding (cluster-scoped, mgmt; docs/promotion.md "Git is the only path"): ReleaseBindings
-of gated environments are created, changed and deleted only by Argo CD applying git. openchoreo-api (console,
-occ, MCP), kubectl and any other identity are denied, whatever their RBAC. The OpenChoreo controller may still update
-metadata (finalizers) without touching spec; status is a subresource and not matched.
-Argo CD writes for every Application with one identity, so the writer must also BE the gated Application of that very
-component: Argo CD's tracking annotation (argocd.argoproj.io/tracking-id = <application>:<group>/<kind>:<namespace>/
-<name>, always set by the controller, a manifest cannot override it) must name exactly
-<owner.projectName>-<owner.componentName>-<spec.environment>, i.e. the Application charts/tenant renders for that
-environment's binding file of the app whose tenant-file name is the component (app name == Component name, one
-Component per app repo: docs/openchoreo.md "App repo contract"; freeze windows, CODEOWNERS on that file). A binding
-smuggled into any other file of the app repo syncs through the main Application <project>-<app> and is denied, and so
-is a binding for another component from any other app's gated Application (another app repo cannot promote it);
-charts/tenant rejects app names that end in -<gated environment>.
-ResourceReleaseBindings (a Resource such as a database bound to an environment, #70) are gated the same way; they have
-no component, so the writer must be a gated Application of the binding's project (<owner.projectName>-<app>-<env>,
-committed to that app repo's release-bindings/<env>.yaml through a reviewed pull request).
-*/ -}}
+{{- /* ValidatingAdmissionPolicy: (Resource)ReleaseBindings of gated environments are written only by their gated Argo CD
+Application, whatever the caller's RBAC. Rules and reasons: docs/promotion.md "Git is the only path". */ -}}
 {{- $g := .Values.promotion }}
 {{- if and $g.gatedEnvironments $g.gitOnly.enabled }}
 apiVersion: admissionregistration.k8s.io/v1

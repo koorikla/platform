@@ -1,13 +1,5 @@
-# OpenChoreo platform-team resources in the control plane (mgmt). Everything here is an OpenChoreo CR except the org
-# namespace label and the auto-build trigger (Argo Workflows + ESO objects in workflows-<org ns>, templates/auto-build.yaml), so the Application fails with "no matches for kind ..." until addon openchoreo-control-plane has
-# installed the CRDs; its retries cover that (CRDs come from the control-plane chart's crds/, installed with it).
-# CRs carry SkipDryRunOnMissingResource so the namespace label still applies on the first attempts.
-#
-# Not here, by design:
-#   Environments       charts/cluster (one per cluster file `openchoreo.dataPlane.environments`, bound to that
-#                      cluster's ClusterDataPlane; dataPlaneRef is immutable)
-#   Projects           charts/tenant (installations/<inst>/tenants/<project>.yaml)
-#   ClusterAuthzRoles  the control-plane chart's authz bootstrap Job (openchoreoApi.config.security.authorization)
+# OpenChoreo platform-team resources on mgmt (README.md). CRs carry SkipDryRunOnMissingResource: Argo CD retries until
+# addon openchoreo-control-plane has installed the CRDs. Environments live in charts/cluster, Projects in charts/tenant.
 
 # --- installation.yaml (defaults so `helm template` works standalone) ---------------------------------------------
 installation:
@@ -34,32 +26,25 @@ deploymentPipeline:
 upstreamDefaults:
   enabled: true
 
-# Platform types for the data-service addons (files/platform/, templates/platform-types.yaml, docs/data-services.md):
-# ClusterTrait keda-scaler (added to the allowedTraits of the Deployment-based component types) and ClusterResourceType
-# postgresql (the Crossplane PostgreSQL XR). Usable only in environments whose data plane runs the addon they name in
-# platform.koorikla.io/requires-addons (fleet file `addons`, ClusterDataPlane annotations).
+# Data-service types in files/platform/ (docs/data-services.md): ClusterTrait keda-scaler and the ClusterResourceTypes
+# of the Crossplane platform APIs (postgresql, mysql, ...).
 dataServices:
   # -- Platform types for the data-service addons (`files/platform/`); usable only where the data plane announces the addon (`platform.koorikla.io/requires-addons`).
   enabled: true
 
-# Resilience defaults (#251, docs/openchoreo.md "Resilience defaults"): ClusterTrait resilience embedded in the
-# Deployment component types (service, web-application, worker). Needs the PriorityClasses app-production/app-standard
-# on the data planes (addon priority-classes).
+# docs/openchoreo.md "Resilience defaults". Needs the PriorityClasses app-production/app-standard on the data planes
+# (addon priority-classes).
 resilience:
   # -- Embed ClusterTrait `resilience` (topology spread, PodDisruptionBudget, preStop + grace period, PriorityClass) in the Deployment component types.
   enabled: true
 
-# Application metrics (#252, docs/openchoreo.md "Application metrics"): opt-in ClusterTrait metrics (PodMonitor for the
-# component's metrics port, scraped by the data plane's Prometheus agent of addon telemetry), allowed on the Deployment
-# component types.
+# docs/openchoreo.md "Application metrics": opt-in PodMonitor for the component's metrics port (addon telemetry scrapes it).
 appMetrics:
   # -- Render ClusterTrait `metrics` and add it to the `allowedTraits` of the Deployment component types.
   enabled: true
 
-# installation.yaml secrets.tenantStores.enabled (#96): component types' ExternalSecrets reference the cell namespace's
-# SecretStore tenantStoreName (== addon secret-stores tenantStores.storeName) instead of ${dataplane.secretStore}.
-# installation.yaml secrets.githubGateApp.enabled: the platform GitHub App is in the store; auto-build stays off
-# without it, else its token ExternalSecrets fail and degrade this app (#192).
+# installation.yaml secrets: tenantStores.enabled points component ExternalSecrets at the cell's SecretStore
+# tenantStoreName (== addon secret-stores tenantStores.storeName); auto-build needs githubGateApp.enabled (its token).
 secrets:
   tenantStores:
     enabled: false
@@ -129,12 +114,8 @@ promotionGate:
   # property `client-secret`.
   clientID: openchoreo-promotion-gate
   clientSecret: { key: promotion-gate, property: client-secret }
-  # The gate's own GitHub App (store key; properties githubAppID, githubAppInstallationID, githubAppPrivateKey), NOT
-  # Argo CD's read-only platform-github. App permissions: Contents, Pull requests, Commit statuses: Read and write
-  # (Metadata: Read); installed on the app repos only. Per run the gate mints an installation token restricted to the
-  # one repository of the component's Workload (spec.source.repository, owner = installation.githubOrg) and revokes
-  # it at the end. Branch protection pins the required status to this App. Seeded by `task secrets` from
-  # GITHUB_GATE_APP_* (docs/forking.md).
+  # The gate's own GitHub App (store key with githubAppID, githubAppInstallationID, githubAppPrivateKey; permissions
+  # and setup: docs/promotion.md, docs/forking.md). Each run mints a token for the component's one repository.
   github: { key: promotion-gate-github }
   statusContext: openchoreo/promotion-gate   # required status check on the app repo's default branch
   baseBranch: main
@@ -187,16 +168,8 @@ buildWorkflows:
   # prefixes, so the run's token is never sent to any other host or owner.
   git:
     allowedRepositoryPrefixes: []
-  # Git credentials: no long-lived token. Per WorkflowRun, ESO's GithubAccessToken generator mints an installation
-  # token of the platform GitHub App restricted to the run's ONE repository (the repository name of the Component's
-  # repository.url, rendered by OpenChoreo per run) and to `permissions` (component builds: clone + the GitOps commit;
-  # runs with gitops.enabled false (PR previews) and helm-chart builds: `readPermissions`, clone only). Re-minted every tokenRefreshInterval while the run lives
-  # (tokens expire after 1h); the GitOps commit goes through the GitHub API, so GitHub authors and signs it as the
-  # App's bot. The App must be installed on the repository (the run fails at checkout with that message otherwise)
-  # and needs Contents: Read and write. `key`: store key with githubAppID, githubAppInstallationID,
-  # githubAppPrivateKey (must be in addon secret-stores workflowStore.keys); default the platform's existing App (the
-  # promotion gate's, installed on the app repos), a dedicated build App works the same way. Its private key reaches
-  # only ESO: ExternalSecret `appSecret` in workflows-<org ns>, read by the generators (templates/build-github.yaml).
+  # Per-run installation tokens of a GitHub App for the run's one repository (docs/build-plane.md "Git credentials").
+  # `key` must be in addon secret-stores workflowStore.keys; previews and helm-chart runs get `readPermissions`.
   github:
     # -- Per-run GitHub App installation tokens (`buildWorkflows.github`) for the run's one repository (ESO `GithubAccessToken` generator; `contents: write` for builds, `read` for charts), no PAT.
     key: promotion-gate-github
@@ -258,17 +231,11 @@ buildWorkflows:
       checkSetup: ""
       checkEnv: {}
 
-# Auto-build (docs/build-plane.md "Auto-build"): build every Component with spec.autoBuild: true on each new commit of
-# its build branch. OpenChoreo 1.3.3 only offers a webhook into openchoreo-api (random run names, so a redelivered
-# push builds twice) and no polling. The trigger is installation.yaml openchoreo.workflowPlane.autoBuild:
-#   poll     CronWorkflow auto-build-poll on pollSchedule: no inbound traffic (local k3d, private clusters)
-#   webhook  GitHub App push webhook -> Argo Events (addon argo-events, HMAC-checked) -> a Workflow from the same
-#            WorkflowTemplate for the pushed repository; the CronWorkflow still runs on resyncSchedule as a safety net
-#   none     nothing (builds only from Backstage / occ / kubectl)
-# Either way one WorkflowTemplate `auto-build` (files/auto-build/auto_build.py) creates WorkflowRun
-# <component>-<sha[:12]> once per commit. Rendered into the run namespace workflows-<org ns> (the scoped secret store
-# `workflows` serves only workflows-* namespaces); egress = that namespace's default-deny NetworkPolicy (DNS, API
-# server, public 443).
+# Auto-build (docs/build-plane.md "Auto-build"): WorkflowRun <component>-<sha[:12]> once per new commit of every
+# Component with spec.autoBuild: true. Trigger = installation.yaml openchoreo.workflowPlane.autoBuild:
+#   poll     CronWorkflow on pollSchedule (no inbound traffic)
+#   webhook  GitHub push -> addon argo-events; the CronWorkflow still runs on resyncSchedule as a safety net
+#   none     builds only from Backstage / occ / kubectl
 autoBuild:
   workflowTemplate: auto-build               # == addon argo-events autoBuild.workflowTemplate (Sensor target)
   # -- Builds Components with `autoBuild: true` once per new commit (`autoBuild.{pollSchedule,resyncSchedule,github}`); trigger per installation `openchoreo.workflowPlane.autoBuild` (`poll` | `webhook` | `none`).
@@ -280,19 +247,14 @@ autoBuild:
   minRateRemaining: 100                      # pause the pass when the token's GitHub rate limit falls below this
   stateConfigMap: auto-build-state           # cache only (ETags, last handled head); losing it never rebuilds
   secretStore: workflows                     # == addon openchoreo-workflow-plane clusterWorkflowPlane.secretStore
-  # GitHub: ESO's GithubAccessToken generator mints an installation token of this App (store key with githubAppID,
-  # githubAppInstallationID, githubAppPrivateKey; must be in addon secret-stores workflowStore.keys) restricted to
-  # `permissions`, rotated every tokenRefreshInterval (tokens expire after 1h). The poll pod mounts only that token.
-  # Default: the platform's existing App (the promotion gate's, installed on the app repos); a dedicated read-only
-  # App works the same way.
+  # Installation token of this GitHub App (store key in addon secret-stores workflowStore.keys), limited to
+  # `permissions` and re-minted every tokenRefreshInterval; the pass mounts only that token.
   github:
     key: promotion-gate-github
     permissions: { contents: read }
     tokenRefreshInterval: 30m
-  # Registry-aware "already built" (registry.type harbor, #200): the pass HEADs the digest the Workload pins; missing
-  # (a clean bootstrap: git pins the previous stack's Harbor) -> rebuild of the Workload's spec.source.commit. Pull-only
-  # robot (== addons/harbor config.robots[name=nodes], already read by nodes and Kyverno); CA from
-  # buildWorkflows.secrets.harbor.caStore/caSecret. The store key must be in addon secret-stores workflowStore.keys.
+  # registry.type harbor: a Workload digest missing in Harbor (e.g. after a clean bootstrap) is rebuilt. Pull-only robot
+  # == addons/harbor config.robots[name=nodes]; CA from buildWorkflows.secrets.harbor.caStore/caSecret.
   registry:
     robot: robot$nodes
     key: harbor

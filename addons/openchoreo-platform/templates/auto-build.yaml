@@ -1,13 +1,5 @@
-{{- /*
-Auto-build trigger (values.yaml autoBuild, docs/build-plane.md "Auto-build") in the run namespace workflows-<org ns> of
-the mgmt workflow plane: WorkflowTemplate auto-build (one reconcile pass of files/auto-build/auto_build.py; the
-argo-events Sensor starts it for webhook pushes) + CronWorkflow auto-build-poll (poll: pollSchedule, webhook: resyncSchedule).
-The pass reads GitHub with a short-lived installation token (ESO GithubAccessToken generator, no PAT). PR previews
-(previews.enabled) add a second token, preview RBAC and, for trigger webhook, CronWorkflow auto-build-previews (PR
-pushes reach the webhook before Argo CD generated the preview Application). registry.type harbor adds a pull-only robot
-+ CA for the "already built" check (a pinned digest missing in Harbor, e.g. after a clean bootstrap, rebuilds; #200).
-Egress: the namespace's default-deny NetworkPolicy (addon openchoreo-workflow-plane): DNS, API server, Harbor, public 443.
-*/ -}}
+{{- /* Auto-build trigger in workflows-<org ns> (docs/build-plane.md "Auto-build"): WorkflowTemplate auto-build runs one
+pass of files/auto-build/auto_build.py; CronWorkflows and the argo-events Sensor start it. */ -}}
 {{- $trigger := toString .Values.openchoreo.workflowPlane.autoBuild }}
 {{- /* Off without the platform GitHub App in the store (secrets.githubGateApp.enabled): every pass needs its token. */ -}}
 {{- if and (ne $trigger "none") .Values.openchoreo.workflowPlane.enabled .Values.buildWorkflows.enabled .Values.secrets.githubGateApp.enabled }}
@@ -145,27 +137,7 @@ subjects:
     name: {{ $name }}
     namespace: {{ $ns }}
 ---
-apiVersion: external-secrets.io/v1
-kind: ExternalSecret
-metadata:
-  name: {{ $name }}-github-app
-  namespace: {{ $ns }}
-spec:
-  refreshInterval: 1h
-  secretStoreRef:
-    kind: ClusterSecretStore
-    name: {{ $a.secretStore }}
-  target:
-    name: {{ $name }}-github-app
-    creationPolicy: Owner
-    deletionPolicy: Delete
-  data:
-    - secretKey: app-id
-      remoteRef: { key: {{ $a.github.key }}, property: githubAppID }
-    - secretKey: installation-id
-      remoteRef: { key: {{ $a.github.key }}, property: githubAppInstallationID }
-    - secretKey: private-key
-      remoteRef: { key: {{ $a.github.key }}, property: githubAppPrivateKey }
+{{ include "platform.githubAppSecret" (dict "name" (printf "%s-github-app" $name) "namespace" $ns "store" $a.secretStore "key" $a.github.key) }}
 ---
 {{ include "autoBuild.githubToken" (dict "name" $name "token" (printf "%s-github-token" $name) "root" $
      "permissions" $a.github.permissions) }}
@@ -343,71 +315,12 @@ spec:
           - { name: REPOSITORY, value: {{ `"{{workflow.parameters.repository}}"` }} }
         source: |
           {{- $script | nindent 10 }}
-{{- /* concurrencyPolicy Forbid: a slow pass is never overlapped by the next tick. */ -}}
-{{- $crons := list }}
-{{- if $schedule }}{{ $crons = append $crons (dict "suffix" "poll" "schedule" $schedule "trigger" $trigger) }}{{ end }}
-{{- if and $pv.enabled (eq $trigger "webhook") $pa.schedule }}{{ $crons = append $crons (dict "suffix" "previews" "schedule" $pa.schedule "trigger" "previews") }}{{ end }}
-{{- range $crons }}
+{{- if $schedule }}
 ---
-apiVersion: argoproj.io/v1alpha1
-kind: CronWorkflow
-metadata:
-  name: {{ $name }}-{{ .suffix }}
-  namespace: {{ $ns }}
-  annotations:
-    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
-spec:
-  schedules: [{{ .schedule | quote }}]
-  timezone: UTC
-  concurrencyPolicy: Forbid
-  startingDeadlineSeconds: 30
-  successfulJobsHistoryLimit: 2
-  failedJobsHistoryLimit: 3
-  workflowMetadata:
-    labels:
-      platform.koorikla.io/trigger: {{ .trigger }}
-  workflowSpec:
-    workflowTemplateRef:
-      name: {{ $name }}
+{{ include "autoBuild.cronWorkflow" (dict "name" $name "ns" $ns "suffix" "poll" "schedule" $schedule "trigger" $trigger) }}
 {{- end }}
-{{- end }}
-
-{{- /* An installation token of the platform GitHub App for the reconcile pass: ESO GithubAccessToken generator <name>
-(scoped to `permissions`) + ExternalSecret <token> that re-mints it every autoBuild.github.tokenRefreshInterval. */ -}}
-{{- define "autoBuild.githubToken" -}}
-{{- $a := .root.Values.autoBuild }}
-{{- $ns := printf "workflows-%s" .root.Values.openchoreo.orgNamespace }}
-{{- $app := printf "%s-github-app" $a.workflowTemplate -}}
-apiVersion: generators.external-secrets.io/v1alpha1
-kind: GithubAccessToken
-metadata:
-  name: {{ .name }}
-  namespace: {{ $ns }}
-  annotations:
-    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
-spec:
-  appIDRef: { name: {{ $app }}, key: app-id }
-  installIDRef: { name: {{ $app }}, key: installation-id }
-  permissions: {{- toYaml .permissions | nindent 4 }}
-  auth:
-    privateKey:
-      secretRef: { name: {{ $app }}, key: private-key }
+{{- if and $pv.enabled (eq $trigger "webhook") $pa.schedule }}
 ---
-apiVersion: external-secrets.io/v1
-kind: ExternalSecret
-metadata:
-  name: {{ .token }}
-  namespace: {{ $ns }}
-spec:
-  refreshInterval: {{ $a.github.tokenRefreshInterval }}
-  target:
-    name: {{ .token }}
-    creationPolicy: Owner
-    deletionPolicy: Delete
-  dataFrom:
-    - sourceRef:
-        generatorRef:
-          apiVersion: generators.external-secrets.io/v1alpha1
-          kind: GithubAccessToken
-          name: {{ .name }}
+{{ include "autoBuild.cronWorkflow" (dict "name" $name "ns" $ns "suffix" "previews" "schedule" $pa.schedule "trigger" "previews") }}
+{{- end }}
 {{- end }}
