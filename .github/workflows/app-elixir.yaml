@@ -1,14 +1,10 @@
 name: elixir
 
-# Elixir / Phoenix app: erlef/setup-beam (.tool-versions or inputs), deps +
-# _build cache, compile --warnings-as-errors, format check, credo, mix test
-# (optional Postgres service), sobelow, hex.audit + mix_audit, Trivy fs on
-# mix.lock, then app-container.yaml.
-# CodeQL does not support Elixir; static analysis is credo + sobelow.
+# Elixir / Phoenix app: checks (ci/README.md#what-gets-checked-per-stack; CodeQL has no Elixir support), then
+# app-container.yaml.
 #
 # Required caller permissions:
-#   contents: read, packages: write, id-token: write, attestations: write,
-#   security-events: write
+#   contents: read, packages: write, id-token: write, attestations: write, security-events: write
 
 on:
   workflow_call:
@@ -47,9 +43,7 @@ on:
         default: ''
       # OpenChoreo manifests: app-openchoreo-manifests.yaml (schemas + repo invariants), same in every app-<stack>.yaml.
       openchoreo_manifests: {type: string, default: 'deploy/openchoreo', description: "OpenChoreo manifests directory ('' skips)"}
-      # Image phase: passed through unchanged to app-container.yaml (build, Trivy scan, SBOM,
-      # provenance, keyless cosign signature). Same names and defaults in every app-<stack>.yaml;
-      # ci/tests/app-workflow-interfaces.test.sh fails when they drift from app-container.yaml.
+      # Image phase: passed to app-container.yaml unchanged; ci/tests/app-workflow-interfaces.test.sh guards drift.
       build_container: {type: boolean, default: true, description: 'Build/scan/sign the container image after checks'}
       image_name: {type: string, default: '', description: 'Image name (default: repository name)'}
       registry: {type: string, default: '', description: 'Registry prefix (default ghcr.io/<owner>)'}

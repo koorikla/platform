@@ -1,13 +1,10 @@
 name: nextjs
 
-# Next.js app: package-manager detection (npm/pnpm/yarn via lockfile), lint,
-# typecheck, test, next build (cached), dependency audit + Trivy fs, CodeQL
-# (javascript-typescript), then app-container.yaml. Expects `output: "standalone"`
-# and a Dockerfile like templates/dockerfiles/nextjs.Dockerfile.
+# Next.js app: checks (ci/README.md#what-gets-checked-per-stack), then app-container.yaml.
+# Expects `output: "standalone"` and a Dockerfile like templates/dockerfiles/nextjs.Dockerfile.
 #
 # Required caller permissions:
-#   contents: read, actions: read, packages: write, id-token: write,
-#   attestations: write, security-events: write
+#   contents: read, actions: read, packages: write, id-token: write, attestations: write, security-events: write
 
 on:
   workflow_call:
@@ -46,9 +43,7 @@ on:
         default: true
       # OpenChoreo manifests: app-openchoreo-manifests.yaml (schemas + repo invariants), same in every app-<stack>.yaml.
       openchoreo_manifests: {type: string, default: 'deploy/openchoreo', description: "OpenChoreo manifests directory ('' skips)"}
-      # Image phase: passed through unchanged to app-container.yaml (build, Trivy scan, SBOM,
-      # provenance, keyless cosign signature). Same names and defaults in every app-<stack>.yaml;
-      # ci/tests/app-workflow-interfaces.test.sh fails when they drift from app-container.yaml.
+      # Image phase: passed to app-container.yaml unchanged; ci/tests/app-workflow-interfaces.test.sh guards drift.
       build_container: {type: boolean, default: true, description: 'Build/scan/sign the container image after checks'}
       image_name: {type: string, default: '', description: 'Image name (default: repository name)'}
       registry: {type: string, default: '', description: 'Registry prefix (default ghcr.io/<owner>)'}

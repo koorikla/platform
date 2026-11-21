@@ -1,10 +1,7 @@
 name: helm-chart
 
-# Helm chart: helm lint --strict, helm-unittest (when <chart>/tests exists),
-# package, push as OCI artifact, cosign keyless sign + SLSA provenance.
-# Version: chart_version input, else the tag (refs/tags/vX.Y.Z -> X.Y.Z), else
-# Chart.yaml version (pushes from main overwrite that version's tag).
-# One chart per call; use a matrix for several charts.
+# Helm chart: lint, helm-unittest, package, push as OCI artifact, sign + SLSA provenance. One chart per call (matrix for
+# more). Version: chart_version, else the tag (vX.Y.Z -> X.Y.Z), else Chart.yaml (main pushes overwrite that tag).
 #
 # Required caller permissions:
 #   contents: read, packages: write, id-token: write, attestations: write
@@ -14,46 +11,37 @@ on:
     inputs:
       chart_path:
         description: 'Chart directory'
-        required: false
         type: string
         default: '.'
       chart_version:
         description: 'Chart version override'
-        required: false
         type: string
         default: ''
       app_version:
         description: 'appVersion override'
-        required: false
         type: string
         default: ''
       lint_args:
         description: 'Extra helm lint arguments'
-        required: false
         type: string
         default: ''
       helm_version:
         description: 'Helm version for azure/setup-helm'
-        required: false
         type: string
         default: 'latest'
       registry:
         description: 'OCI registry prefix for charts (default ghcr.io/<owner>/charts)'
-        required: false
         type: string
         default: ''
       push:
         description: 'Push and sign on non-PR events'
-        required: false
         type: boolean
         default: true
     secrets:
       registry_username:
         description: 'Registry username (non-GHCR registries)'
-        required: false
       registry_password:
         description: 'Registry password/token (non-GHCR registries)'
-        required: false
     outputs:
       chart:
         description: 'Pushed chart reference oci://<registry>/<name>:<version>'

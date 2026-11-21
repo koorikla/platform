@@ -1,22 +1,10 @@
 name: java
 
-# JVM service - Quarkus (recommended) or Spring Boot (plain Java works too):
-# Maven or Gradle (wrapper preferred, auto-detected), pinned Temurin JDK 25 LTS,
-# compile + tests + JaCoCo coverage, CycloneDX SBOM of the resolved runtime
-# dependencies scanned with Trivy and osv-scanner, CodeQL (java-kotlin), then
-# app-container.yaml: multi-arch image on native runners, scan, SBOM, provenance,
-# keyless cosign. Images (templates/dockerfiles/):
-#   - quarkus.Dockerfile: Quarkus JVM mode on distroless Java (default)
-#   - quarkus-native.Dockerfile: opt-in Quarkus native executable (Mandrel builder,
-#     built per arch on native runners); select with `native: true`
-#   - spring-boot.Dockerfile: layered Spring Boot jar on distroless Java (no buildpacks)
-# Caches: Maven repository (setup-java) or Gradle home (setup-gradle, which
-# also validates the Gradle wrapper checksum).
+# JVM service (Quarkus, Spring Boot or plain Java; Maven or Gradle): checks (ci/README.md#what-gets-checked-per-stack),
+# then app-container.yaml. Dockerfiles: templates/dockerfiles/{quarkus,quarkus-native,spring-boot}.Dockerfile.
 #
 # Required caller permissions:
-#   contents: read, actions: read, packages: write, id-token: write,
-#   attestations: write, security-events: write
-# Bump the OpenChoreo Workload afterwards with app-workload-bump.yaml.
+#   contents: read, actions: read, packages: write, id-token: write, attestations: write, security-events: write
 
 on:
   workflow_call:
@@ -63,9 +51,7 @@ on:
         default: 'none'
       # OpenChoreo manifests: app-openchoreo-manifests.yaml (schemas + repo invariants), same in every app-<stack>.yaml.
       openchoreo_manifests: {type: string, default: 'deploy/openchoreo', description: "OpenChoreo manifests directory ('' skips)"}
-      # Image phase: passed through unchanged to app-container.yaml (build, Trivy scan, SBOM,
-      # provenance, keyless cosign signature). Same names and defaults in every app-<stack>.yaml;
-      # ci/tests/app-workflow-interfaces.test.sh fails when they drift from app-container.yaml.
+      # Image phase: passed to app-container.yaml unchanged; ci/tests/app-workflow-interfaces.test.sh guards drift.
       build_container: {type: boolean, default: true, description: 'Build/scan/sign the container image after checks'}
       image_name: {type: string, default: '', description: 'Image name (default: repository name)'}
       registry: {type: string, default: '', description: 'Registry prefix (default ghcr.io/<owner>)'}

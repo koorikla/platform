@@ -100,9 +100,8 @@ spec:
       name: Create the repository
       action: publish:github
       input:
-        # No token input: the GitHub integration authenticates as the platform write GitHub App (platform-github-app,
-        # docs/forking.md credentials (c)). Repository settings and rulesets are NOT set here: they are declared in
-        # the governance record below and reconciled by Crossplane (koorikla/platform#100).
+        # No token input: the GitHub integration authenticates as the platform write GitHub App (docs/forking.md (c)).
+        # Repository settings and rulesets come from the governance record below, reconciled by Crossplane (#100).
         repoUrl: github.com?owner=${{ parameters.repoOwner }}&repo=${{ parameters.name }}
         description: ${{ parameters.description }}
         repoVisibility: ${{ parameters.visibility }}

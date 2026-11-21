@@ -4,10 +4,8 @@
 #   ci        ci-vX.Y.Z  ci/ (scripts, toolbox, fixtures)  (ci/CHANGELOG.md) - the ref app repos pin for app-* workflows
 # Runs as the koorikla-promotion-gate GitHub App (short-lived installation token) so the release PR triggers CI;
 # GITHUB_TOKEN-created PRs would not.
-# The root package "." has NO `component` (#313): with include-component-in-tag false release-please writes the root's
-# body entry and the grouped branch release-please--branches--main without a component, then on merge compares that
-# against `component`; a name there made every root-only release log "PR component: undefined does not match
-# configured component" and abort untagged. ci/tests/release-please-tagging.test.js (selftest) guards this.
+# The root package "." must have no `component`, else root-only releases abort untagged (#313); guarded by
+# ci/tests/release-please-tagging.test.js (selftest).
 name: release
 
 on:

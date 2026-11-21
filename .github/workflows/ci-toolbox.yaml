@@ -1,10 +1,7 @@
 name: toolbox
 
-# Builds ghcr.io/koorikla/platform/ci-toolbox (multi-arch, scanned, SBOM, attested,
-# cosign-signed) with the same app-container.yaml app repos use, then smoke-tests
-# the pushed image natively on amd64 and arm64. The package lives under this repo's
-# namespace (like ghcr.io/koorikla/platform/postgresql) so the workflow's GITHUB_TOKEN
-# owns it: ghcr.io/koorikla/ci-toolbox belongs to the archived koorikla/ci (#254).
+# Builds ghcr.io/koorikla/platform/ci-toolbox with the same app-container.yaml app repos use, then smoke-tests
+# the pushed image on amd64 and arm64. Lives under this repo's namespace so GITHUB_TOKEN owns the package (#254).
 
 on:
   workflow_dispatch:

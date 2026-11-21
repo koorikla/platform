@@ -1,10 +1,7 @@
 name: openchoreo-manifests
 
-# Validates an app repo's OpenChoreo manifests (deploy/openchoreo) against the CRD schemas of the OpenChoreo version
-# this platform runs (ci/schemas, regenerated from the vendored charts: hack/tests/test_project_templates.sh fails when
-# they drift) plus the repo invariants OpenChoreo only reports after Argo CD synced (ci/scripts/openchoreo/
-# validate-manifests.py). Every app-<stack>.yaml calls it, so app repos carry no validation code. Skipped when the
-# directory does not exist.
+# Validates an app repo's OpenChoreo manifests against this platform's CRD schemas and repo invariants
+# (ci/README.md#what-gets-checked-per-stack). Every app-<stack>.yaml calls it; skipped when the directory is missing.
 #
 # Required caller permissions:
 #   contents: read

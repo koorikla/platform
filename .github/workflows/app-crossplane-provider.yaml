@@ -1,106 +1,83 @@
 name: crossplane-provider
 
-# Crossplane provider (native Go or upjet): generate-is-clean check, go vet /
-# test -race / govulncheck (+ optional golangci-lint, CodeQL), multi-arch
-# controller image via container.yaml (scan, SBOM, attestations, signature),
-# then one .xpkg per platform with the controller embedded
-# (--embed-runtime-image-tarball), pushed as a multi-arch package index,
-# cosign-signed (index + per-platform) with SLSA provenance.
+# Crossplane provider (native Go or upjet): Go checks (ci/README.md#what-gets-checked-per-stack), controller image via
+# app-container.yaml, then one multi-arch .xpkg with the controller embedded, signed with SLSA provenance.
 #
 # Required caller permissions:
-#   contents: read, actions: read, packages: write, id-token: write,
-#   attestations: write, security-events: write
+#   contents: read, actions: read, packages: write, id-token: write, attestations: write, security-events: write
 
 on:
   workflow_call:
     inputs:
       working_directory:
         description: 'Provider repository root (go.mod, Makefile)'
-        required: false
         type: string
         default: '.'
       package_root:
         description: 'Directory with crossplane.yaml + crds, relative to working_directory'
-        required: false
         type: string
         default: 'package'
       generate_command:
         description: "Code generation command checked for a clean git diff ('' skips)"
-        required: false
         type: string
         default: 'make generate'
       run_lint:
         description: 'Run golangci-lint'
-        required: false
         type: boolean
         default: true
       run_vulncheck:
         description: 'Run govulncheck'
-        required: false
         type: boolean
         default: true
       run_codeql:
         description: 'Run CodeQL (go); slow on large generated upjet providers'
-        required: false
         type: boolean
         default: false
       go_test_flags:
         description: 'go test flags'
-        required: false
         type: string
         default: '-race -coverprofile=coverage.out -covermode=atomic ./...'
       crossplane_version:
         description: 'Crossplane CLI version'
-        required: false
         type: string
         default: 'v2.5.0'
       package_name:
         description: 'Package (OCI repository) name (default: metadata.name in crossplane.yaml)'
-        required: false
         type: string
         default: ''
       controller_image_name:
         description: 'Controller image name (default <package_name>-controller)'
-        required: false
         type: string
         default: ''
       registry:
         description: 'Registry prefix (default ghcr.io/<owner>)'
-        required: false
         type: string
         default: ''
       dockerfile:
         description: 'Controller Dockerfile (default <working_directory>/Dockerfile)'
-        required: false
         type: string
         default: ''
       platforms:
         description: 'Comma-separated platforms (controller image and package)'
-        required: false
         type: string
         default: 'linux/amd64,linux/arm64'
       multiarch_strategy:
         description: 'native (per-arch runners) or qemu'
-        required: false
         type: string
         default: 'native'
       push:
         description: 'Push and sign on non-PR events'
-        required: false
         type: boolean
         default: true
       trivy_severity:
         description: 'Severities that fail the controller image scan'
-        required: false
         type: string
         default: 'CRITICAL'
     secrets:
       registry_username:
         description: 'Registry username (non-GHCR registries)'
-        required: false
       registry_password:
         description: 'Registry password/token (non-GHCR registries)'
-        required: false
     outputs:
       package:
         description: 'Package reference tagged with the short SHA'

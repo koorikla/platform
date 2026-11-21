@@ -1,111 +1,87 @@
 name: container
 
-# Shared building block: multi-arch build (native arm64 + amd64 runners pushed
-# by digest and merged into one manifest list, or buildx + QEMU) -> Trivy scan
-# of every platform -> SPDX SBOM -> GitHub attestations (SLSA provenance, SBOM)
-# -> cosign keyless sign of the manifest list and each platform manifest
-# (+ cosign vuln attestation). PRs build linux/amd64 only, scan, never push. Called by every stack workflow; can also be
-# called directly for repos that only ship a Dockerfile.
+# Image phase of every app-<stack>.yaml (ci/README.md "Where the image phase lives"); a Dockerfile-only repo can call it
+# directly. PRs build linux/amd64 only, scan and never push. Kyverno trusts this file's path as the image signer.
 #
-# Required caller permissions (job that `uses:` this workflow):
-#   contents: read, packages: write, id-token: write, attestations: write,
-#   security-events: write
+# Required caller permissions:
+#   contents: read, packages: write, id-token: write, attestations: write, security-events: write
 
 on:
   workflow_call:
     inputs:
       image_name:
         description: 'Image name (default: repository name)'
-        required: false
         type: string
         default: ''
       registry:
         description: 'Registry prefix, e.g. ghcr.io/koorikla or harbor.example.com/apps (default ghcr.io/<owner>)'
-        required: false
         type: string
         default: ''
       context:
         description: 'Docker build context'
-        required: false
         type: string
         default: '.'
       dockerfile:
         description: 'Path to the Dockerfile'
-        required: false
         type: string
         default: 'Dockerfile'
       platforms:
         description: 'Comma-separated target platforms (PR builds are linux/amd64 only)'
-        required: false
         type: string
         default: 'linux/amd64,linux/arm64'
       build_args:
         description: 'Newline-separated extra build-args (VERSION=<short sha> is always set)'
-        required: false
         type: string
         default: ''
       push:
         description: 'Push, attest and sign on non-PR events'
-        required: false
         type: boolean
         default: true
       trivy_severity:
         description: 'Comma-separated severities that fail the Trivy scan'
-        required: false
         type: string
         default: 'CRITICAL'
       trivy_ignore_unfixed:
         description: 'Ignore vulnerabilities without a fixed version'
-        required: false
         type: boolean
         default: true
       trivy_fail:
         description: 'Fail the job on findings at trivy_severity (false = report only)'
-        required: false
         type: boolean
         default: true
       trivy_ignore_file:
         description: 'Repo-relative .trivyignore(.yaml) with accepted risks (empty = none)'
-        required: false
         type: string
         default: ''
       upload_sarif:
         description: 'Upload Trivy SARIF to GitHub code scanning'
-        required: false
         type: boolean
         default: true
       sarif_category:
         description: 'Code-scanning category (default container-<image>)'
-        required: false
         type: string
         default: ''
       artifact_name:
         description: 'If set, download this workflow artifact into <context> before building (e.g. a prebuilt binary or xpkg inputs)'
-        required: false
         type: string
         default: ''
       multiarch_strategy:
         description: 'native = one runner per arch (ubuntu-24.04 + ubuntu-24.04-arm) merged into one manifest list; qemu = single amd64 runner with buildx + QEMU'
-        required: false
         type: string
         default: 'native'
       runner_amd64:
         description: 'Runner label for linux/amd64 builds'
-        required: false
         type: string
         default: 'ubuntu-24.04'
       runner_arm64:
         description: 'Runner label for linux/arm64 builds (native strategy)'
-        required: false
         type: string
         default: 'ubuntu-24.04-arm'
     secrets:
       registry_username:
         description: 'Registry username (default github.actor; needed for non-GHCR registries)'
-        required: false
       registry_password:
         description: 'Registry password/token (default GITHUB_TOKEN)'
-        required: false
     outputs:
       image:
         description: 'Image reference tagged with the short SHA (<repo>:<short_sha>)'

@@ -1,28 +1,7 @@
 name: workload-bump
 
-# GitOps hand-off: point the app's OpenChoreo Workload at the image a stack
-# workflow just pushed (<repo>:<short sha>@sha256:<index digest>; production
-# admission only accepts digest references) and the built commit, then commit
-# and push to the branch (`[skip ci]`). Skipped when `digest` is empty (PRs and
-# other non-push runs build without pushing).
-#
-#   jobs:
-#     go:
-#       uses: koorikla/platform/.github/workflows/app-go.yaml@<sha> # main
-#       ...
-#     bump:
-#       needs: go
-#       if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-#       uses: koorikla/platform/.github/workflows/app-workload-bump.yaml@<sha> # main
-#       permissions:
-#         contents: write
-#       with:
-#         image: ${{ needs.go.outputs.image }}
-#         digest: ${{ needs.go.outputs.digest }}
-#
-# Callers that trigger on push should ignore the Workload path
-# (`paths-ignore: ['deploy/**']`); the commit message also carries [skip ci].
-# Branch protection must allow github-actions[bot] (or the token used) to push.
+# GitOps hand-off: pin the pushed image (<repo>:<tag>@<digest>) and the built commit in the app's OpenChoreo Workload,
+# commit and push ([skip ci]); skipped when `digest` is empty. Usage: ci/README.md#workload-bump-gitops-hand-off.
 #
 # Required caller permissions:
 #   contents: write
@@ -40,32 +19,26 @@ on:
         type: string
       workload_file:
         description: 'Workload manifest to update'
-        required: false
         type: string
         default: 'deploy/openchoreo/workload.yaml'
       commit_sha:
         description: 'Source commit written to spec.source.commit (default github.sha)'
-        required: false
         type: string
         default: ''
       branch:
         description: 'Branch to commit to (default: the triggering branch)'
-        required: false
         type: string
         default: ''
       commit_message:
         description: "Commit message (default 'chore(deploy): bump <image name> image to <tag> [skip ci]')"
-        required: false
         type: string
         default: ''
       validate_command:
         description: 'Optional shell command run after the edit, before committing (e.g. a schema validation)'
-        required: false
         type: string
         default: ''
       push:
         description: 'Push the commit (false = dry run: edit, commit locally, show the diff)'
-        required: false
         type: boolean
         default: true
     outputs:

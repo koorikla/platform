@@ -4,9 +4,8 @@
 name: portability
 
 on:
-  # Not on PRs or pushes: the matrix is slow (4 OS/arch + 2 devcontainer jobs) and PR feedback for parallel agents
-  # must stay fast; `ci` already runs `task lint test` on Linux. Nightly catches portability regressions on main and
-  # upstream asset/registry drift; run it by hand (`gh workflow run portability`) for a toolchain change.
+  # Nightly, not on PRs: the 6-job matrix is slow and `ci` already runs `task lint test` on Linux. Catches regressions
+  # and upstream asset drift on main; run it by hand (`gh workflow run portability`) for a toolchain change.
   schedule:
     - cron: "17 3 * * *"
   workflow_dispatch:

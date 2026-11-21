@@ -1,19 +1,10 @@
 name: node
 
-# Generic Node.js service or SSR app (Express, Fastify, NestJS, Nuxt,
-# SvelteKit, Remix, ...; Next.js has nextjs.yaml): package manager from
-# package.json "packageManager" / lockfile (pnpm and yarn via corepack),
-# lockfile-frozen install, the project's lint / typecheck / test / build
-# scripts when defined, production dependency audit + Trivy fs, CodeQL
-# (javascript-typescript), then app-container.yaml (multi-arch build on native
-# runners, scan, SBOM, provenance, keyless cosign). Expects a Dockerfile like
-# templates/dockerfiles/node.Dockerfile (distroless Node.js; build_script and
-# start_entry are passed to it as BUILD_SCRIPT / START_ENTRY build args).
+# Node.js service or SSR app (Next.js: app-nextjs.yaml): checks (ci/README.md#what-gets-checked-per-stack), then
+# app-container.yaml. Expects a Dockerfile like templates/dockerfiles/node.Dockerfile.
 #
 # Required caller permissions:
-#   contents: read, actions: read, packages: write, id-token: write,
-#   attestations: write, security-events: write
-# Bump the OpenChoreo Workload afterwards with app-workload-bump.yaml.
+#   contents: read, actions: read, packages: write, id-token: write, attestations: write, security-events: write
 
 on:
   workflow_call:
@@ -68,9 +59,7 @@ on:
         default: true
       # OpenChoreo manifests: app-openchoreo-manifests.yaml (schemas + repo invariants), same in every app-<stack>.yaml.
       openchoreo_manifests: {type: string, default: 'deploy/openchoreo', description: "OpenChoreo manifests directory ('' skips)"}
-      # Image phase: passed through unchanged to app-container.yaml (build, Trivy scan, SBOM,
-      # provenance, keyless cosign signature). Same names and defaults in every app-<stack>.yaml;
-      # ci/tests/app-workflow-interfaces.test.sh fails when they drift from app-container.yaml.
+      # Image phase: passed to app-container.yaml unchanged; ci/tests/app-workflow-interfaces.test.sh guards drift.
       build_container: {type: boolean, default: true, description: 'Build/scan/sign the container image after checks'}
       image_name: {type: string, default: '', description: 'Image name (default: repository name)'}
       registry: {type: string, default: '', description: 'Registry prefix (default ghcr.io/<owner>)'}

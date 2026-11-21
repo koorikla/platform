@@ -1,15 +1,7 @@
 name: crossplane-configuration
 
-# Crossplane configuration package (XRDs + Compositions + function pipeline), either a classic package
-# (crossplane.yaml: `crossplane xpkg build/push`) or a Crossplane Project (crossplane-project.yaml:
-# `crossplane project build/push`, same validation, signing and provenance; an embedded function functions/<fn>/ is
-# built for the render tests and pushed, signed and attested as <repo>_<fn>):
-# pinned Crossplane CLI, `crossplane resource validate` of package objects
-# (against Crossplane core + function/provider schemas from crossplane.yaml)
-# and of example XRs (against the XRDs), `crossplane composition render` of
-# every example XR with validation of the composed resources and a diff
-# against tests/render/expected/<file> when present, then `crossplane xpkg
-# build`, push to an OCI registry, cosign keyless sign + SLSA provenance.
+# Crossplane configuration package or Crossplane Project: validate, render every example XR (diff vs
+# tests/render/expected/), build, push, sign, attest. Checks: ci/README.md#what-gets-checked-per-stack.
 #
 # Required caller permissions:
 #   contents: read, packages: write, id-token: write, attestations: write
@@ -19,51 +11,41 @@ on:
     inputs:
       package_root:
         description: 'Directory containing crossplane-project.yaml (Crossplane Project, the default layout) or crossplane.yaml (classic package)'
-        required: false
         type: string
         default: '.'
       examples_dir:
         description: 'Example XRs (relative to package_root); bundled into the package'
-        required: false
         type: string
         default: 'examples'
       render_dir:
         description: 'Render test assets relative to package_root (functions.yaml, expected/, observed/, extra-resources/)'
-        required: false
         type: string
         default: 'tests/render'
       ignore:
         description: 'Extra comma-separated xpkg build --ignore patterns'
-        required: false
         type: string
         default: ''
       crossplane_version:
         description: 'Crossplane CLI version'
-        required: false
         type: string
         default: 'v2.5.0'
       package_name:
         description: 'Package (OCI repository) name (default: metadata.name in crossplane.yaml)'
-        required: false
         type: string
         default: ''
       registry:
         description: 'Registry prefix (default ghcr.io/<owner>)'
-        required: false
         type: string
         default: ''
       push:
         description: 'Push and sign on non-PR events'
-        required: false
         type: boolean
         default: true
     secrets:
       registry_username:
         description: 'Registry username (non-GHCR registries)'
-        required: false
       registry_password:
         description: 'Registry password/token (non-GHCR registries)'
-        required: false
     outputs:
       package:
         description: 'Package reference tagged with the short SHA'
@@ -259,9 +241,8 @@ jobs:
           RECURSIVE: 'false'
         run: bash "$CI_SCRIPTS/common/sign-image.sh"
 
-      # A Crossplane Project's embedded function (functions/<fn>/), pushed by `crossplane project push` as
-      # <repo>_<fn>: a multi-arch index, signed recursively (index + per-platform manifests) and attested like the
-      # Configuration. Skipped for plain xpkg packages and projects without one.
+      # A Crossplane Project's embedded function (functions/<fn>/, pushed as the multi-arch index <repo>_<fn>):
+      # attested and signed recursively like the Configuration. Skipped when there is none.
       - name: Attest SLSA build provenance (embedded function)
         if: steps.vars.outputs.should_push == 'true' && steps.push.outputs.function_digest != ''
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
