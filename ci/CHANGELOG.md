@@ -3,6 +3,13 @@
 `ci-vX.Y.Z` releases of `ci/` and the `app-*` reusable workflows, maintained by release-please
 ([docs/releases.md](../docs/releases.md)).
 
+## [1.2.0](https://github.com/koorikla/platform/compare/ci-v1.1.1...ci-v1.2.0) (2026-11-21)
+
+
+### Features
+
+* **ci:** app manifest validation in the platform's stack workflows; code-free templates ([#366](https://github.com/koorikla/platform/issues/366)) ([561de3b](https://github.com/koorikla/platform/commit/561de3b45e0e4332c724658e9abf4a4e516e497f))
+
 ## [1.1.1](https://github.com/koorikla/platform/compare/ci-v1.1.0...ci-v1.1.1) (2026-11-20)
 
 
