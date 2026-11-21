@@ -1,6 +1,6 @@
 {
-  ".": "0.8.0",
-  "ci": "1.1.1",
+  ".": "0.9.0",
+  "ci": "1.2.0",
   "packages/postgresql": "0.2.0",
   "packages/mysql": "0.3.0",
   "packages/valkey": "0.2.0",
