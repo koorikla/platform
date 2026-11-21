@@ -18,10 +18,8 @@ spec:
   template:
     metadata:
       name: {{ `'cluster-{{ .name }}'` }}
-      # Background cascade: Argo CD deletes the CAPI Cluster like `kubectl delete` and CAPI tears it down in order
-      # (control plane and machines, then infrastructure). The default (foreground) finalizer makes the garbage
-      # collector delete the Cluster's dependents all at once: the DockerCluster went first and CAPD then never
-      # finalizes the DockerMachine ("DockerCluster is not available yet"), leaving the Cluster Deleting (#115).
+      # Background cascade lets CAPI tear the Cluster down in order; foreground deleted its dependents at once and left
+      # it stuck Deleting (#115).
       finalizers:
         - resources-finalizer.argocd.argoproj.io/background
     spec:
@@ -38,7 +36,7 @@ spec:
           # bootstrap's REGISTRY_CACHE=0 reaches the root app as a parameter; the cluster chart reads installation.yaml
           parameters:
             - name: registry.hostCache.enabled
-              value: {{ dig "hostCache" "enabled" false (.Values.registry | default dict) | toString | quote }}
+              value: {{ .Values.registry.hostCache.enabled | toString | quote }}
       destination:
         server: https://kubernetes.default.svc
         namespace: fleet

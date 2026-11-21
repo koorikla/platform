@@ -1,20 +1,8 @@
-# Stakater Reloader (catalog: namespace reloader, roles [mgmt, workload], default true). These defaults are the
-# workload setup; mgmt layers values/role-mgmt.yaml (Backstage in openchoreo-control-plane on config change, scoped
-# Role, no Secret reads).
-#
-# Workload clusters: Reloader rolls a Deployment only when the Deployment opts in by annotation and a Secret/ConfigMap
-# it references changes (no autoReloadAll here):
-# - openchoreo-data-plane/cluster-agent-dataplane when CAPI ClusterResourceSet updates `cluster-agent-tls` or
-#   `cluster-gateway-ca` (docs/openchoreo.md "Trust model");
-# - every app Deployment in a tenant cell `dp-*` (also previews) when its OpenBao-backed Secret rotates: OpenChoreo's
-#   component types annotate them `secret.reloader.stakater.com/auto: "true"` (addon openchoreo-platform, #268).
-# Cell namespaces are created at runtime with a hash in the name, so a static `namespaces` list cannot name them and
-# Reloader watches cluster-wide (its namespaceSelector only filters in-process: it still needs a ClusterRole to list
-# Secrets, like ESO). What it may WRITE is fenced by templates/rollout-guard.yaml: only Deployments/StatefulSets/
-# DaemonSets in cells and `rolloutGuard.platformNamespaces`, and only the pod-template annotation Reloader sets.
-#
-# Meets Pod Security `restricted`; namespace `reloader` is not in Kyverno's `platformNamespaces`, so the Pod Security
-# policies report on it like any workload.
+# Stakater Reloader. These defaults are the workload setup: roll workloads that opt in by annotation when a referenced
+# Secret/ConfigMap changes (the cluster-agent on cert/CA renewal, app Deployments in tenant cells on secret rotation,
+# #268). mgmt layers values/role-mgmt.yaml (Backstage on config change). docs/openchoreo.md.
+# Cell namespaces get runtime names, so Reloader watches cluster-wide; templates/rollout-guard.yaml fences what it may
+# write. Meets Pod Security `restricted`.
 
 # -- Namespaces (besides tenant cells, label `openchoreo.dev/project`) where Reloader may roll annotated workloads.
 rolloutGuard:
@@ -29,8 +17,7 @@ reloader:
   reloader:
     # -- Workload: cluster-wide watch (tenant cells have runtime names); writes fenced by templates/rollout-guard.yaml. mgmt (`values/role-mgmt.yaml`): `false` + `namespaces: [openchoreo-control-plane]`, scoped Role.
     watchGlobally: true
-    # Patch pod-template annotation `reloader.stakater.com/last-reloaded-from` (FieldManager: Reloader) rather than
-    # injecting STAKATER_* env vars into containers[].env, so Argo CD ServerSideApply / server-side diff sees no drift.
+    # Roll via a pod-template annotation instead of injected STAKATER_* env vars, so Argo CD sees no drift.
     reloadStrategy: annotations
     ignoreJobs: true
     ignoreCronJobs: true

@@ -1,11 +1,5 @@
-{{- /*
-provider byo only (values/provider-byo.yaml; docs/providers.md "Bring your own cluster (byo)"): ConfigMap
-cluster-gateway-ca, which a ClusterResourceSet delivers on CAPI clusters. mgmt pushes the gateway CA's PUBLIC cert as
-Secret platform-delivery/cluster-gateway-ca (charts/cluster PushSecret <cluster>-push-gateway-ca; PushSecret writes only
-Secrets) and this ExternalSecret turns it into the ConfigMap the agent mounts (clusterAgent.tls.serverCAConfigMap),
-through ClusterSecretStore `delivery` (addon secret-stores, name-scoped). Needs external-secrets' generic targets
-(addon external-secrets values/provider-byo.yaml).
-*/ -}}
+{{- /* provider byo (no ClusterResourceSet): rebuilds ConfigMap cluster-gateway-ca from the Secret mgmt pushes (PushSecret
+writes only Secrets). docs/providers.md "Bring your own cluster (byo)". */ -}}
 {{- if .Values.byoDelivery.enabled }}
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret

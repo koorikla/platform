@@ -1,30 +1,14 @@
-{{- /* Capability gate (#246, #255; values capabilityGate, docs/data-services.md "KEDA and OpenChoreo workloads").
-
-The cluster agent (upstream Deployment, sync wave 0) is the data plane's only door to OpenChoreo: until it connects,
-nothing is deployed here. This Sync hook in wave -1 holds the agent back until the CRDs of every opt-in addon this
-cluster runs that a platform ClusterTrait or ClusterResourceType renders are Established (keda-scaler -> ScaledObject,
-postgresql -> the PostgreSQL XR from the crossplane Configuration package, which lands minutes after crossplane).
-
-Why: on a fresh bootstrap OpenChoreo applied hello-world's ScaledObject before addon keda was installed. The apply failed
-("scaledobjects.keda.sh ... not found") and OpenChoreo 1.3.3 retries a failed RenderedRelease only on controller-runtime's
-exponential backoff (5 ms doubling, capped at 1000 s, nothing re-queues it when KEDA arrives), so development stayed down
-for ~17 min after KEDA was Healthy. With the gate the first apply that reaches this cluster finds every kind it needs.
-
-Shell-free (distroless kubectl): one init container per addon, `wait-for-<addon>-crds`, waits for its CRDs to exist,
-then one container waits for all of them to be Established. Stuck? `kubectl -n <ns> get pod -l
-app.kubernetes.io/name=capability-gate` shows Init:N/M and the container name says which addon is missing (e.g. a failed
-crossplane Configuration package: `kubectl get configuration.pkg`). A timeout fails the hook with kubectl's "timed out
-waiting ... customresourcedefinitions/<crd>", Argo CD retries the sync (retry.limit -1) and the agent never starts
-without them: loud, not a silent wait. A HookSucceeded Job is deleted; it reruns on every sync of this app and passes in
-seconds once the CRDs exist. */ -}}
+{{- /* Capability gate (#246): a Sync hook in wave -1 holds the cluster agent (wave 0) back until the CRDs of every enabled
+capabilityGate.addons entry exist (one init container per addon) and are Established. Why and how to debug it:
+docs/data-services.md "KEDA and OpenChoreo workloads". */ -}}
 {{- $crds := list }}
 {{- $waits := list }}{{/* (addon, crds) per enabled addon, in key order */}}
 {{- range $addon, $cfg := .Values.capabilityGate.addons }}
 {{- if eq (toString $cfg.enabled) "true" }}
-{{- $mine := list }}
-{{- range $cfg.crds }}{{ $mine = append $mine (printf "crd/%s" .) }}{{ end }}
-{{- $crds = concat $crds $mine }}
-{{- $waits = append $waits (dict "addon" $addon "crds" $mine) }}
+{{- $addonCrds := list }}
+{{- range $cfg.crds }}{{ $addonCrds = append $addonCrds (printf "crd/%s" .) }}{{ end }}
+{{- $crds = concat $crds $addonCrds }}
+{{- $waits = append $waits (dict "addon" $addon "crds" $addonCrds) }}
 {{- end }}
 {{- end }}
 {{- if $crds }}

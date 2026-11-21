@@ -1,8 +1,6 @@
-# Wrapper defaults for argo-cd (mgmt only).
-# Used identically by bootstrap/bootstrap.sh and the GitOps argo-cd-mgmt Application so adoption is clean.
-# Images pinned by multi-arch index digest (docs/conventions.md invariant 9; hack/tests/test_image_pins.sh): every
-# component running quay.io/argoproj/argocd gets the same tag@digest (per component, not global.image.tag, which also
-# feeds the app.kubernetes.io/version label). A chart bump updates the anchor below and redis together.
+# Argo CD on mgmt. bootstrap/bootstrap.sh installs it with these same values, so the GitOps Application adopts it cleanly.
+# Every argocd component pins the same tag@digest via the anchor below (not global.image.tag, which also feeds the
+# version label); a chart bump updates it and redis together (docs/conventions.md invariant 9).
 argo-cd:
   fullnameOverride: argocd
   global:
@@ -13,19 +11,18 @@ argo-cd:
     params:
       server.insecure: true
       # -- `true` so CAPI, ESO, cert-manager, and OpenChoreo CRD defaults do not cause permanent diffs.
-      controller.diff.server.side: true   # prevent permanent diff on CAPI/ESO/cert-manager/OpenChoreo CRD defaults
+      controller.diff.server.side: true
       # -- Upstream defaults (20/10): ~45 apps converge at once on a clean bootstrap; 10/5 queued them.
       controller.status.processors: 20
       controller.operation.processors: 10
     cm:
       # -- `"true"` so `repo-server` builds HTTPS and OCI wrapper dependencies (`ARGOCD_EXEC_TIMEOUT=180s`).
-      helm.dependencies.enabled: "true"   # repo-server runs helm dependency build for wrapper charts (https + OCI)
+      helm.dependencies.enabled: "true"
       # -- Upstream default 120s. An app whose first comparison fails (a new workload cluster's Argo secret lands before
       # its API serves) is only retried on this period: with 300s+60s jitter dev1's addons idled ~8 min.
       timeout.reconciliation: 120s
       timeout.reconciliation.jitter: 30s
-      # Thunder's PreSync setup Job mounts a PVC; k3s local-path binds on first consumer (WaitForFirstConsumer).
-      # Treat Pending PVCs as Healthy so the hook Job can start and bind the volume.
+      # Thunder's PreSync setup Job mounts a PVC that k3s local-path binds only on first consumer.
       # -- Treats `Pending` `WaitForFirstConsumer` PVCs as `Healthy` so hook Jobs can bind volumes.
       resource.customizations.health.PersistentVolumeClaim: |
         hs = {}
@@ -43,9 +40,8 @@ argo-cd:
         end
         hs.status = "Progressing"
         return hs
-      # Kyverno (1.20) never sets status.conditionStatus.ready on (Namespaced)DeletingPolicy: the cleanup controller
-      # only writes lastExecutionTime (pkg/controllers/deleting). Argo CD's built-in check (v3.6) reads a missing
-      # `ready` as Degraded, so every scheduled DeletingPolicy degrades its app. Healthy unless Kyverno reports a failure.
+      # Kyverno 1.20 never sets conditionStatus.ready on DeletingPolicies, which Argo CD 3.6 reads as Degraded:
+      # Healthy unless Kyverno reports a failure.
       resource.customizations.health.policies.kyverno.io_DeletingPolicy: &deletingPolicyHealth |
         hs = {}
         local cs = nil
@@ -76,10 +72,8 @@ argo-cd:
         end
         return hs
       resource.customizations.health.policies.kyverno.io_NamespacedDeletingPolicy: *deletingPolicyHealth
-      # CAPI (1.13) sets ResourcesApplied on a ClusterResourceSet only once a Cluster matches its selector. Argo CD's
-      # built-in check (v3.6) reads a missing condition as Progressing forever, so a CRS for the mesh PEERS of the only
-      # member (lean local profile) kept its cluster app Progressing (#192). Reconciled (a condition observed this
-      # generation) without ResourcesApplied = nothing matches = Healthy; otherwise as upstream.
+      # CAPI 1.13 sets ResourcesApplied only once a Cluster matches, which Argo CD 3.6 reads as Progressing forever
+      # (#192): reconciled without ResourcesApplied = nothing matches = Healthy; otherwise as upstream.
       resource.customizations.health.addons.cluster.x-k8s.io_ClusterResourceSet: |
         hs = {}
         local reconciled = false

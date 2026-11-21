@@ -47,9 +47,7 @@ spec:
   template:
     metadata:
       name: {{ printf "'%s-{{ .name }}'" $addon }}
-      {{- /* IncludeMutationWebhook=true for addons rendering Argo Workflows objects: their CRD spec is atomic +
-      preserve-unknown and server-side diff would report Synced while the live spec stays old (#184,
-      argoproj/argo-cd#27625). hack/tests/test_argocd_compare_options.sh enforces it. */}}
+      {{- /* Which addons need which compare option: the catalog header in values.yaml (#184, #281). */}}
       {{- with $cfg.compareOptions }}
       annotations:
         argocd.argoproj.io/compare-options: {{ join "," . | quote }}
@@ -157,9 +155,8 @@ spec:
           {{- if $cfg.serverSideDiff }}
           - ServerSideDiff=true
           {{- end }}
-        # Never give up: on a clean bootstrap an addon can wait on another app's CRDs longer than any fixed budget
-        # (#192), and a failed operation stays failed until the next commit. The 1m cap bounds idle time after the
-        # dependency turns healthy (5m left keda/cloudnative-pg/crossplane/cluster-fleet sleeping). Same as fleet.
+        # Never give up: an addon can wait on another app's CRDs longer than any fixed budget (#192); the 1m cap
+        # bounds the idle time after the dependency turns healthy.
         retry:
           limit: -1
           refresh: true

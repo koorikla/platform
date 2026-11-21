@@ -1,13 +1,13 @@
-# PriorityClasses ClusterTrait resilience assigns (#251, #276). Names are referenced by the trait (addon
-# openchoreo-platform files/platform/cluster-traits/resilience.yaml): rename both together.
+# Names are referenced by ClusterTrait resilience (addon openchoreo-platform files/platform/cluster-traits/resilience.yaml):
+# rename both together. preemptionPolicy Never: app priority orders the scheduling queue and never evicts running pods.
 # -- PriorityClasses by name. value and preemptionPolicy are immutable: changing either makes Argo CD delete and
 # recreate the class on the next sync (#281, docs/conventions.md "Immutable fields").
 priorityClasses:
   app-production:
     value: 100000
-    preemptionPolicy: Never   # app priority orders the scheduling queue only and never evicts running pods
+    preemptionPolicy: Never
     description: OpenChoreo components in the production environment (ClusterTrait resilience).
   app-standard:
     value: 1000
-    preemptionPolicy: Never   # app priority orders the scheduling queue only and never evicts running pods
+    preemptionPolicy: Never
     description: OpenChoreo components outside production (ClusterTrait resilience).

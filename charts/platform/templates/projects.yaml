@@ -40,7 +40,7 @@ spec:
     - server: https://kubernetes.default.svc
       namespace: argocd
     - server: https://kubernetes.default.svc
-      namespace: {{ ((.Values.openchoreo).orgNamespace) | default "default" | quote }}
+      namespace: {{ .Values.openchoreo.orgNamespace | quote }}
   clusterResourceWhitelist:
     - group: ""
       kind: Namespace
@@ -84,7 +84,7 @@ spec:
     - {{ .Values.installation.repoURL | quote }}
   destinations:
     - server: https://kubernetes.default.svc
-      namespace: {{ ((.Values.openchoreo).orgNamespace) | default "default" | quote }}
+      namespace: {{ .Values.openchoreo.orgNamespace | quote }}
   clusterResourceWhitelist: []
   namespaceResourceWhitelist:
     - group: openchoreo.dev

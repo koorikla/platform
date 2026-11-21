@@ -13,9 +13,11 @@ match the delivered client cert Secret and gateway CA ConfigMap. */ -}}
 {{- fail "openchoreo-data-plane.clusterAgent.tls: enabled, secretName != clientSecretName, caSecretName empty (identity comes from the ClusterResourceSet)" }}
 {{- end }}
 {{- $pa := $ca.podAnnotations | default dict }}
-{{- if ne (index $pa "secret.reloader.stakater.com/reload" | default "") $ca.tls.clientSecretName }}
-{{- fail (printf "openchoreo-data-plane.clusterAgent.podAnnotations[\"secret.reloader.stakater.com/reload\"] (%q) must equal clusterAgent.tls.clientSecretName (%q)" (index $pa "secret.reloader.stakater.com/reload" | default "") $ca.tls.clientSecretName) }}
+{{- $reloadSecret := index $pa "secret.reloader.stakater.com/reload" | default "" }}
+{{- $reloadConfigMap := index $pa "configmap.reloader.stakater.com/reload" | default "" }}
+{{- if ne $reloadSecret $ca.tls.clientSecretName }}
+{{- fail (printf "openchoreo-data-plane.clusterAgent.podAnnotations[\"secret.reloader.stakater.com/reload\"] (%q) must equal clusterAgent.tls.clientSecretName (%q)" $reloadSecret $ca.tls.clientSecretName) }}
 {{- end }}
-{{- if ne (index $pa "configmap.reloader.stakater.com/reload" | default "") $ca.tls.serverCAConfigMap }}
-{{- fail (printf "openchoreo-data-plane.clusterAgent.podAnnotations[\"configmap.reloader.stakater.com/reload\"] (%q) must equal clusterAgent.tls.serverCAConfigMap (%q)" (index $pa "configmap.reloader.stakater.com/reload" | default "") $ca.tls.serverCAConfigMap) }}
+{{- if ne $reloadConfigMap $ca.tls.serverCAConfigMap }}
+{{- fail (printf "openchoreo-data-plane.clusterAgent.podAnnotations[\"configmap.reloader.stakater.com/reload\"] (%q) must equal clusterAgent.tls.serverCAConfigMap (%q)" $reloadConfigMap $ca.tls.serverCAConfigMap) }}
 {{- end }}

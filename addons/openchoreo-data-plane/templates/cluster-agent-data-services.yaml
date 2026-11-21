@@ -1,9 +1,5 @@
-{{- /* RBAC for the platform's data-service types (#70, addon openchoreo-platform files/platform/): upstream's ClusterRole
-cluster-agent-dataplane-<ns> knows neither KEDA nor the platform's PostgreSQL XR, so the agent could not apply
-(server-side apply) or observe (list for RenderedRelease status) a keda-scaler ScaledObject or a postgresql
-ResourceType's XR. One rule per kind a platform ClusterTrait / ClusterResourceType renders; the CRDs exist only where the
-addon runs (keda, crossplane), a grant for a missing kind is inert. hack/tests/test_openchoreo_types.sh checks that every
-kind the platform's OpenChoreo types render is granted here or upstream. */ -}}
+{{- /* Agent RBAC for the kinds the platform's ClusterTraits / ClusterResourceTypes render that upstream's ClusterRole
+lacks (#70); a grant for a kind whose addon is off is inert. hack/tests/test_openchoreo_types.sh. */ -}}
 {{- with .Values.clusterAgentDataServices }}
 {{- if .enabled }}
 apiVersion: rbac.authorization.k8s.io/v1
